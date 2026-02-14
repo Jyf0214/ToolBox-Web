@@ -13,5 +13,7 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# 基础镜像不拷贝代码，不安装 pip 依赖
+# 基础镜像安装 pip 依赖
 WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt

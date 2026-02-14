@@ -81,13 +81,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check for Dockerfile.base changes
+      - name: Check for Dockerfile.base or requirements.txt changes
         id: filter
         uses: dorny/paths-filter@v3
         with:
           filters: |
             base:
               - 'Dockerfile.base'
+              - 'requirements.txt'
 
       - name: Log in to GHCR
         if: steps.filter.outputs.base == 'true' || github.event_name == 'workflow_dispatch'
