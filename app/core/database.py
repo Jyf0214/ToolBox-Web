@@ -1,8 +1,9 @@
 from motor.motor_asyncio import AsyncIOMotorClient
+import certifi
 from app.core.config import settings
 
-# MongoDB 客户端
-client = AsyncIOMotorClient(settings.DATABASE_URL)
+# MongoDB 客户端，显式指定证书路径以解决 SSL 握手问题
+client = AsyncIOMotorClient(settings.DATABASE_URL, tlsCAFile=certifi.where())
 
 # 获取数据库实例（从 URL 中解析或使用默认值）
 # 如果 DATABASE_URL 中没有指定数据库名，motor 默认使用 'test'
