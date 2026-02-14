@@ -133,8 +133,8 @@ async def startup():
         state.db_connected = True  # 数据库连接成功
 
         # 尝试创建所有表
-        async with database.AsyncSessionLocal() as session:
-            await session.run_sync(Base.metadata.create_all)
+        async with database.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
         print("数据库表创建/检查成功。")
 
     except Exception as e:
