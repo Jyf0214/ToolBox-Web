@@ -259,7 +259,9 @@ async def main_page(request: Request):
     )
 
     with ui.header().classes("items-center justify-between bg-slate-800 p-4 flex-wrap"):
-        ui.label(site_title).classes("text-2xl font-bold text-white")
+        with ui.row().classes("items-center"):
+            ui.label(site_title).classes("text-2xl font-bold text-white")
+            ui.label(f"v{settings.VERSION}").classes("text-xs text-slate-300 ml-2")
         ui.button(icon="settings", on_click=lambda: ui.navigate.to("/admin")).props(
             "flat color=white"
         ).disable() if not state.db_connected else None
@@ -315,7 +317,9 @@ async def admin_page():
         return
 
     with ui.header().classes("bg-slate-900 items-center justify-between p-4 flex-wrap"):
-        ui.label("管理后台").classes("text-xl text-white")
+        with ui.row().classes("items-center"):
+            ui.label("管理后台").classes("text-xl text-white")
+            ui.label(f"v{settings.VERSION}").classes("text-xs text-slate-400 ml-2")
         with ui.row().classes("items-center"):
             ui.button(icon="home", on_click=lambda: ui.navigate.to("/")).props(
                 "flat color=white"
@@ -380,7 +384,7 @@ async def admin_page():
 
 # 启动，指定端口为 7860
 ui.run(
-    title="工具箱",
+    title=f"工具箱 v{settings.VERSION}",
     storage_secret="dynamic-key-placeholder",
     port=7860,
     viewport="width=device-width, initial-scale=1",
