@@ -201,7 +201,6 @@ jobs:
   cleanup:
     name: Cleanup Untagged Images
     runs-on: ubuntu-latest
-    needs: lint-and-security
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Delete untagged image versions
