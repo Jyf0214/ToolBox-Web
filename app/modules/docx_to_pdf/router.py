@@ -124,21 +124,30 @@ class DocxToPdfModule(BaseModule):
 
             async def handle_upload(e):
                 try:
-                    file_name = getattr(
-                        e, "name", getattr(e, "filename", "unknown.docx")
-                    )
+                    # 在新版本 NiceGUI 中，信息存储在 e.file 中
+                    file_name = getattr(e.file, "filename", "unknown.docx")
                     state["name"] = file_name
-                    if hasattr(e.content, "read"):
-                        state["content"] = e.content.read()
+
+                    # e.file.content 通常是一个 BinaryIO 或类似对象
+                    # 我们需要读取它的二进制内容
+                    content = e.file.read()
+
+                    # 某些版本的 NiceGUI 可能返回协程
+                    if hasattr(content, "__await__"):
+                        state["content"] = await content
                     else:
-                        state["content"] = e.content
+                        state["content"] = content
+
                     ui.notify(f"已上传: {file_name}", color="positive")
                     convert_btn.enable()
                 except Exception as ex:
                     import traceback
 
-                    attr_list = dir(e)
-                    error_msg = f"Upload Handling Error: {str(ex)}\n\nAvailable attributes: {attr_list}\n\nTraceback:\n{traceback.format_exc()}"
+                    # 获取 e.file 的属性供调试
+                    file_attr_list = (
+                        dir(e.file) if hasattr(e, "file") else "e.file missing"
+                    )
+                    error_msg = f"Upload Handling Error: {str(ex)}\n\nAvailable attributes on e.file: {file_attr_list}\n\nTraceback:\n{traceback.format_exc()}"
                     ui.notify("文件处理失败", color="negative")
                     show_error_report(error_msg)
 
