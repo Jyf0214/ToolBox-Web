@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.exc import OperationalError
+from sqlalchemy import text
 from app.core.config import settings
 import ssl
 import logging
@@ -46,7 +47,7 @@ async def create_engine_with_ssl_fallback():
         logger.info("Attempting MySQL connection with default SSL...")
         engine = create_async_engine(db_url, echo=False)
         async with engine.connect() as conn:
-            await conn.run_sync(lambda sync_conn: sync_conn.execute("SELECT 1"))
+            await conn.run_sync(lambda sync_conn: sync_conn.execute(text("SELECT 1")))
         logger.info("MySQL connection successful with default SSL.")
         return
     except OperationalError as e:
@@ -80,7 +81,7 @@ async def create_engine_with_ssl_fallback():
         # 但是 CERT_NONE 是标准做法
         engine = create_async_engine(db_url, echo=False, connect_args=connect_args)
         async with engine.connect() as conn:
-            await conn.run_sync(lambda sync_conn: sync_conn.execute("SELECT 1"))
+            await conn.run_sync(lambda sync_conn: sync_conn.execute(text("SELECT 1")))
         logger.warning(
             "MySQL connection successful with SSL, but certificate verification was disabled. 连接SSL认证不可信。"
         )
@@ -122,7 +123,7 @@ async def create_engine_with_ssl_fallback():
             engine = create_async_engine(new_url, echo=False)
 
         async with engine.connect() as conn:
-            await conn.run_sync(lambda sync_conn: sync_conn.execute("SELECT 1"))
+            await conn.run_sync(lambda sync_conn: sync_conn.execute(text("SELECT 1")))
         logger.info("MySQL connection successful without SSL.")
         return
     except Exception as e:

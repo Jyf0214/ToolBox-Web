@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-02-14
+
+### Fixed
+- Fixed `sqlalchemy.exc.ObjectNotExecutableError: Not an executable object: 'SELECT 1'` by using `text('SELECT 1')`.
+
 ## [0.1.2] - 2026-02-14
 
 ### Fixed
