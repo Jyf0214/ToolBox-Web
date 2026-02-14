@@ -39,6 +39,7 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                         "text-negative text-xs mb-4"
                     )
 
+                user_input = ui.input("用户名").classes("w-full")
                 pwd = ui.input("密码", password=True).classes("w-full")
 
                 async def login():
@@ -49,14 +50,17 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                         )
                         return
 
-                    if not pwd.value:
-                        ui.notify("请输入密码", color="warning")
+                    if not user_input.value or not pwd.value:
+                        ui.notify("用户名和密码不能为空", color="warning")
                         return
 
                     try:
                         async with database.AsyncSessionLocal() as session:
                             result = await session.execute(
-                                select(User).where(User.is_admin)
+                                select(User).where(
+                                    User.username == user_input.value,
+                                    User.is_admin,
+                                )
                             )
                             admin = result.scalars().first()
 
@@ -66,16 +70,14 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                                     ui.notify("登录成功", color="positive")
                                     ui.navigate.to("/admin")
                                 else:
-                                    ui.notify("密码错误", color="negative")
+                                    ui.notify("用户名或密码错误", color="negative")
                             else:
-                                ui.notify(
-                                    "未发现管理员账户，请尝试重新初始化",
-                                    color="negative",
-                                )
+                                ui.notify("用户名或密码错误", color="negative")
                     except Exception as e:
                         ui.notify(f"登录过程出错: {e}", color="negative")
 
                 pwd.on("keydown.enter", login)
+                user_input.on("keydown.enter", login)
                 ui.button("登录", on_click=login).classes("w-full mt-4")
 
                 # --- 忘记密码逻辑 ---
@@ -86,19 +88,24 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                     ).props("flat size=sm color=grey")
 
                 # 重置密码对话框
-                with ui.dialog() as reset_dialog, ui.card().classes("w-full max-w-md"):
+                with ui.dialog() as reset_dialog, ui.card().classes("w-full max-md"):
                     ui.label("重置管理员密码").classes("text-h6")
                     ui.label(
                         "出于安全考虑，点击下方按钮后，重置码将打印在服务器终端。"
                     ).classes("text-xs text-slate-500 mb-4")
 
                     with ui.column().classes("w-full gap-4"):
+                        reset_user_input = ui.input("管理员用户名").classes("w-full")
                         code_input = ui.input("请输入 32 位重置码").classes("w-full")
                         new_pwd_input = ui.input("新密码", password=True).classes(
                             "w-full"
                         )
 
                         async def request_code():
+                            if not reset_user_input.value:
+                                ui.notify("请输入要重置的用户名", color="warning")
+                                return
+
                             now = time.time()
                             ip_info = reset_data.get(client_ip, {"last_request": 0})
 
@@ -113,12 +120,15 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
 
                             reset_data[client_ip] = {
                                 "code": code,
+                                "user": reset_user_input.value,
                                 "expires": now + 600,  # 10 分钟有效
                                 "last_request": now,
                             }
 
                             print("\n" + "=" * 50)
-                            print(f"管理员密码重置码 (来自 IP: {client_ip}):")
+                            print(
+                                f"管理员密码重置码 (用户: {reset_user_input.value}, 来自 IP: {client_ip}):"
+                            )
                             print(f"CODE: {code}")
                             print("=" * 50 + "\n")
 
@@ -126,8 +136,12 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
 
                         async def perform_reset():
                             info = reset_data.get(client_ip)
-                            if not info or info["code"] != code_input.value:
-                                ui.notify("重置码错误", color="negative")
+                            if (
+                                not info
+                                or info["code"] != code_input.value
+                                or info["user"] != reset_user_input.value
+                            ):
+                                ui.notify("验证信息错误", color="negative")
                                 return
 
                             if time.time() > info["expires"]:
@@ -138,21 +152,38 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                                 ui.notify("请输入新密码", color="warning")
                                 return
 
-                            async with database.AsyncSessionLocal() as session:
-                                await session.execute(
-                                    update(User)
-                                    .where(User.is_admin)
-                                    .values(
-                                        hashed_password=get_password_hash(
-                                            new_pwd_input.value
+                            try:
+                                async with database.AsyncSessionLocal() as session:
+                                    # 验证用户是否存在且为管理员
+                                    res = await session.execute(
+                                        select(User).where(
+                                            User.username == reset_user_input.value,
+                                            User.is_admin,
                                         )
                                     )
-                                )
-                                await session.commit()
+                                    admin_user = res.scalars().first()
+                                    if not admin_user:
+                                        ui.notify(
+                                            "指定用户不存在或非管理员", color="negative"
+                                        )
+                                        return
 
-                            ui.notify("密码已成功重置，请登录", color="positive")
-                            reset_dialog.close()
-                            del reset_data[client_ip]
+                                    await session.execute(
+                                        update(User)
+                                        .where(User.username == reset_user_input.value)
+                                        .values(
+                                            hashed_password=get_password_hash(
+                                                new_pwd_input.value
+                                            )
+                                        )
+                                    )
+                                    await session.commit()
+
+                                ui.notify("密码已成功重置，请登录", color="positive")
+                                reset_dialog.close()
+                                del reset_data[client_ip]
+                            except Exception as e:
+                                ui.notify(f"重置失败: {e}", color="negative")
 
                         with ui.row().classes("w-full justify-between mt-4"):
                             ui.button("获取重置码", on_click=request_code).props(
