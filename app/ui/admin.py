@@ -10,15 +10,29 @@ from app.core.auth import is_authenticated, verify_password
 from app.core.updater import check_for_updates, pull_updates
 
 
+import secrets
+import string
+import time
+from fastapi import Request
+
+from app.core.auth import get_password_hash
+
+# 存储重置码及其过期时间、IP 频率限制
+# 格式: {ip: {"code": str, "expires": float, "attempts": int, "last_request": float}}
+reset_data = {}
+
+
 def create_admin_page(state, load_modules_func, sync_modules_func):
     @ui.page("/admin")
-    async def admin_page():
+    async def admin_page(request: Request):
+        client_ip = request.client.host
+
         if state.needs_setup:
             ui.navigate.to("/setup")
             return
 
         if not is_authenticated():
-            with ui.card().classes("absolute-center w-[90vw] max-w-xs shadow-lg p-6"):
+            with ui.card().classes("absolute-center w-[90vw] max-w-sm shadow-lg p-6"):
                 ui.label("管理登录").classes("text-h6 mb-2")
                 if not state.db_connected:
                     ui.label("注意：数据库当前未连接，登录将无法进行。").classes(
@@ -41,7 +55,6 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
 
                     try:
                         async with database.AsyncSessionLocal() as session:
-                            # 查找管理员用户
                             result = await session.execute(
                                 select(User).where(User.is_admin)
                             )
@@ -62,9 +75,90 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                     except Exception as e:
                         ui.notify(f"登录过程出错: {e}", color="negative")
 
-                # 绑定回车事件
                 pwd.on("keydown.enter", login)
-                ui.button("登录", on_click=login).classes("w-full mt-2")
+                ui.button("登录", on_click=login).classes("w-full mt-4")
+
+                # --- 忘记密码逻辑 ---
+                with ui.row().classes("w-full justify-center mt-2"):
+                    ui.button(
+                        "忘记密码？",
+                        on_click=lambda: reset_dialog.open(),
+                    ).props("flat size=sm color=grey")
+
+                # 重置密码对话框
+                with ui.dialog() as reset_dialog, ui.card().classes("w-full max-w-md"):
+                    ui.label("重置管理员密码").classes("text-h6")
+                    ui.label(
+                        "出于安全考虑，点击下方按钮后，重置码将打印在服务器终端。"
+                    ).classes("text-xs text-slate-500 mb-4")
+
+                    with ui.column().classes("w-full gap-4"):
+                        code_input = ui.input("请输入 32 位重置码").classes("w-full")
+                        new_pwd_input = ui.input("新密码", password=True).classes(
+                            "w-full"
+                        )
+
+                        async def request_code():
+                            now = time.time()
+                            ip_info = reset_data.get(client_ip, {"last_request": 0})
+
+                            # 频率限制：每 60 秒只能请求一次
+                            if now - ip_info["last_request"] < 60:
+                                ui.notify("请求太频繁，请稍后再试", color="warning")
+                                return
+
+                            # 生成 32 位随机字符
+                            alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+                            code = "".join(secrets.choice(alphabet) for _ in range(32))
+
+                            reset_data[client_ip] = {
+                                "code": code,
+                                "expires": now + 600,  # 10 分钟有效
+                                "last_request": now,
+                            }
+
+                            print("\n" + "=" * 50)
+                            print(f"管理员密码重置码 (来自 IP: {client_ip}):")
+                            print(f"CODE: {code}")
+                            print("=" * 50 + "\n")
+
+                            ui.notify("重置码已发送至终端", color="positive")
+
+                        async def perform_reset():
+                            info = reset_data.get(client_ip)
+                            if not info or info["code"] != code_input.value:
+                                ui.notify("重置码错误", color="negative")
+                                return
+
+                            if time.time() > info["expires"]:
+                                ui.notify("重置码已过期", color="warning")
+                                return
+
+                            if not new_pwd_input.value:
+                                ui.notify("请输入新密码", color="warning")
+                                return
+
+                            async with database.AsyncSessionLocal() as session:
+                                await session.execute(
+                                    update(User)
+                                    .where(User.is_admin)
+                                    .values(
+                                        hashed_password=get_password_hash(
+                                            new_pwd_input.value
+                                        )
+                                    )
+                                )
+                                await session.commit()
+
+                            ui.notify("密码已成功重置，请登录", color="positive")
+                            reset_dialog.close()
+                            del reset_data[client_ip]
+
+                        with ui.row().classes("w-full justify-between mt-4"):
+                            ui.button("获取重置码", on_click=request_code).props(
+                                "outline"
+                            )
+                            ui.button("确认修改", on_click=perform_reset)
             return
 
         # --- 管理界面头部 ---
