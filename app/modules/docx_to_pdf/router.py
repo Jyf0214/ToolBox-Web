@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import uuid
 from app.modules.base import BaseModule
@@ -57,6 +58,7 @@ class DocxToPdfModule(BaseModule):
                 if not file_info["content"]:
                     return
 
+                input_path = None
                 processing_dialog = ui.dialog()
                 with processing_dialog, ui.card():
                     ui.spinner(size="lg")
@@ -77,18 +79,27 @@ class DocxToPdfModule(BaseModule):
                     # --headless: 无界面模式
                     # --convert-to pdf: 目标格式
                     # --outdir: 输出目录
+                    libreoffice_path = (
+                        shutil.which("libreoffice") or "/usr/bin/libreoffice"
+                    )
+                    # 验证输入文件路径安全（防止目录遍历）
+                    abs_input_path = os.path.abspath(input_path)
+                    abs_temp_dir = os.path.abspath(self.temp_dir)
+                    if not abs_input_path.startswith(abs_temp_dir):
+                        raise ValueError("Invalid input path")
                     result = subprocess.run(
                         [
-                            "libreoffice",
+                            libreoffice_path,
                             "--headless",
                             "--convert-to",
                             "pdf",
-                            input_path,
+                            abs_input_path,
                             "--outdir",
                             self.temp_dir,
                         ],
                         capture_output=True,
                         text=True,
+                        shell=False,
                     )
 
                     if result.returncode == 0:
@@ -104,7 +115,7 @@ class DocxToPdfModule(BaseModule):
                     ui.notify(f"出错: {ex}", color="negative")
                 finally:
                     processing_dialog.close()
-                    if os.path.exists(input_path):
+                    if input_path and os.path.exists(input_path):
                         os.remove(input_path)
 
             convert_btn = ui.button("开始转换", on_click=convert).classes("w-full mt-4")

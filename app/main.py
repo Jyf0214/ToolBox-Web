@@ -599,7 +599,7 @@ async def admin_page():
 # 启动，指定端口为 7860
 ui.run(
     title=f"工具箱 v{settings.VERSION}",
-    storage_secret="dynamic-key-placeholder",
+    storage_secret=settings._SECRET_KEY or os.urandom(32).hex(),
     port=7860,
     viewport="width=device-width, initial-scale=1",
-)  # nosec
+)
