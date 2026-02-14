@@ -61,7 +61,6 @@ class DocxToPdfModule(BaseModule):
 
                 # 创建空白页
                 from reportlab.pdfgen import canvas
-                # No specific pagesize import needed as width/height are used
 
                 blank_pdf_path = pdf_path.replace(".pdf", "_blank.pdf")
                 c = canvas.Canvas(blank_pdf_path, pagesize=(width, height))
@@ -88,7 +87,6 @@ class DocxToPdfModule(BaseModule):
 
             return True
         except ImportError:
-            # 如果 PyPDF2 未安装，返回成功但不添加空白页
             return True
         except Exception as e:
             print(f"添加空白页时出错: {e}")
@@ -118,12 +116,44 @@ class DocxToPdfModule(BaseModule):
             error_dialog.open()
 
         with ui.card().classes("w-full max-w-xl p-6"):
-            # 使用字典存储状态
             state = {"name": "", "content": None}
 
             add_blank_page = ui.checkbox(
                 "奇数页时自动添加空白页（使总页数为偶数）", value=True
             ).classes("mb-4")
+
+            async def handle_upload(e):
+                try:
+                    file_name = getattr(
+                        e, "name", getattr(e, "filename", "unknown.docx")
+                    )
+                    state["name"] = file_name
+                    if hasattr(e.content, "read"):
+                        state["content"] = e.content.read()
+                    else:
+                        state["content"] = e.content
+                    ui.notify(f"已上传: {file_name}", color="positive")
+                    convert_btn.enable()
+                except Exception as ex:
+                    import traceback
+
+                    attr_list = dir(e)
+                    error_msg = f"Upload Handling Error: {str(ex)}\n\nAvailable attributes: {attr_list}\n\nTraceback:\n{traceback.format_exc()}"
+                    ui.notify("文件处理失败", color="negative")
+                    show_error_report(error_msg)
+
+            def handle_rejected(e):
+                ui.notify(f"文件上传被拒绝: {e}", color="negative")
+
+            # 文件上传组件在上方
+            ui.upload(
+                label="选择 .docx 文件",
+                on_upload=handle_upload,
+                on_rejected=handle_rejected,
+                auto_upload=True,
+            ).props(
+                'accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"'
+            ).classes("w-full mb-4")
 
             result_container = ui.row().classes("mt-4 w-full justify-center")
 
@@ -140,16 +170,13 @@ class DocxToPdfModule(BaseModule):
                 processing_dialog.open()
 
                 try:
-                    # 保存临时 docx
                     file_id = str(uuid.uuid4())
                     input_path = os.path.join(self.temp_dir, f"{file_id}.docx")
                     output_path = os.path.join(self.temp_dir, f"{file_id}.pdf")
 
-                    # 使用已读取的内容
                     with open(input_path, "wb") as f:
                         f.write(state["content"])
 
-                    # 验证输入文件路径安全
                     abs_input_path = os.path.abspath(input_path)
                     abs_temp_dir = os.path.abspath(self.temp_dir)
                     if not abs_input_path.startswith(abs_temp_dir):
@@ -161,7 +188,7 @@ class DocxToPdfModule(BaseModule):
 
                     if not os.path.exists(libreoffice_path):
                         raise FileNotFoundError(
-                            f"LibreOffice not found at {libreoffice_path}. Please ensure it is installed."
+                            f"LibreOffice not found at {libreoffice_path}."
                         )
 
                     result = subprocess.run(
@@ -215,42 +242,6 @@ class DocxToPdfModule(BaseModule):
                     if input_path and os.path.exists(input_path):
                         os.remove(input_path)
 
+            # 开始转换按钮在下方
             convert_btn = ui.button("开始转换", on_click=convert).classes("w-full mt-4")
             convert_btn.disable()
-
-            async def handle_upload(e):
-                try:
-                    # 尝试从不同可能的属性中获取文件名
-                    file_name = getattr(
-                        e, "name", getattr(e, "filename", "unknown.docx")
-                    )
-                    state["name"] = file_name
-
-                    # 立即读取内容
-                    if hasattr(e.content, "read"):
-                        state["content"] = e.content.read()
-                    else:
-                        state["content"] = e.content
-
-                    ui.notify(f"已上传: {file_name}", color="positive")
-                    convert_btn.enable()
-                except Exception as ex:
-                    import traceback
-
-                    # 获取对象的属性列表以供调试
-                    attr_list = dir(e)
-                    error_msg = f"Upload Handling Error: {str(ex)}\n\nAvailable attributes on event object: {attr_list}\n\nTraceback:\n{traceback.format_exc()}"
-                    ui.notify("文件处理失败", color="negative")
-                    show_error_report(error_msg)
-
-            def handle_rejected(e):
-                ui.notify(f"文件上传被拒绝: {e}", color="negative")
-
-            ui.upload(
-                label="选择 .docx 文件",
-                on_upload=handle_upload,
-                on_rejected=handle_rejected,
-                auto_upload=True,
-            ).props(
-                'accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"'
-            ).classes("w-full")
