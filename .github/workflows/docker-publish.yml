@@ -88,7 +88,6 @@ jobs:
           filters: |
             base:
               - 'Dockerfile.base'
-              - '.github/workflows/docker-publish.yml'
 
       - name: Log in to GHCR
         if: steps.filter.outputs.base == 'true' || github.event_name == 'workflow_dispatch'
