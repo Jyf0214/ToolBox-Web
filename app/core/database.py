@@ -44,17 +44,24 @@ async def create_engine_with_ssl_fallback():
 
     db_url = settings.DATABASE_URL
 
-    # 全局禁止不安全的连接方式
+    # 1. 自动处理协议头
+    if db_url.startswith("mysql://"):
+        db_url = db_url.replace("mysql://", "mysql+asyncmy://", 1)
+        print("DEBUG: 自动修正数据库协议头为 mysql+asyncmy://")
+    elif not db_url.startswith("mysql+asyncmy://"):
+        print(f"CRITICAL: 不支持的数据库协议: {db_url.split('://')[0]}")
+        raise ValueError("Unsupported database dialect. Use mysql+asyncmy://")
+
+    # 2. 全局禁止不安全的连接参数
     if "ssl=disabled" in db_url.lower() or "ssl=false" in db_url.lower():
-        print("CRITICAL: 检测到不安全的连接字符串配置，已拒绝。")
+        print("CRITICAL: 检测到不安全的连接字符串参数 (ssl=disabled/false)，已拒绝。")
         raise ValueError("Insecure database connections are strictly prohibited.")
 
-    # 第一次尝试：使用标准 SSL 验证
+    # 3. 第一次尝试：使用标准 SSL 验证
     print("\n[1/2] 正在尝试标准 SSL 连接... (超时设定: 10s)")
     print(f"目标节点: {db_url.split('@')[-1]}")
 
     try:
-        # 使用 wait_for 包装整个连接过程
         engine = await asyncio.wait_for(
             test_connection_with_timeout(db_url, {"ssl": True}), timeout=10.0
         )
@@ -63,7 +70,7 @@ async def create_engine_with_ssl_fallback():
         error_msg = str(e) or "Connection Handshake Timeout"
         print(f"反馈: 第一次连接尝试未通过。原因: {error_msg}")
 
-        # 第二次尝试：TOFU 模式
+        # 4. 第二次尝试：TOFU 模式 (信任证书并强制 SSL 加密)
         print("\n[2/2] 正在切换至 TOFU 模式 (信任证书并强制 SSL 加密)...")
 
         ctx = ssl.create_default_context()
@@ -79,7 +86,7 @@ async def create_engine_with_ssl_fallback():
             print(f"FATAL: 数据库所有加密连接尝试均失败: {retry_e}")
             raise retry_e
 
-    # 初始化 Session 工厂
+    # 5. 初始化 Session 工厂
     AsyncSessionLocal = sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
