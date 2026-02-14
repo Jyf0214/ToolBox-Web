@@ -109,7 +109,7 @@ async def setup_page():
         ui.navigate.to("/")
         return
 
-    with ui.card().classes("absolute-center w-96 shadow-lg"):
+    with ui.card().classes("absolute-center w-[90vw] max-w-md shadow-lg p-6"):
         ui.label("ToolBox Setup").classes("text-h5 text-center mb-4")
         admin_username = ui.input("Admin Username", value="admin").classes("w-full")
         admin_password = ui.input(
@@ -167,16 +167,16 @@ async def main_page(request: Request):
     """
     )
 
-    with ui.header().classes("items-center justify-between bg-slate-800 p-4"):
+    with ui.header().classes("items-center justify-between bg-slate-800 p-4 flex-wrap"):
         ui.label(site_title).classes("text-2xl font-bold text-white")
-        ui.button("Admin", on_click=lambda: ui.navigate.to("/admin")).props(
-            "flat color=white icon=settings"
+        ui.button(icon="settings", on_click=lambda: ui.navigate.to("/admin")).props(
+            "flat color=white"
         )
 
     if not modules:
         ui.label("No modules loaded.").classes("p-8 text-center w-full")
     else:
-        with ui.tabs().classes("w-full") as tabs:
+        with ui.tabs().classes("w-full overflow-x-auto") as tabs:
             for m in modules:
                 ui.tab(m.name, icon=m.icon)
         with ui.tab_panels(tabs, value=modules[0].name).classes("w-full"):
@@ -192,7 +192,7 @@ async def admin_page():
         return
 
     if not is_authenticated():
-        with ui.card().classes("absolute-center w-80 shadow-lg"):
+        with ui.card().classes("absolute-center w-[90vw] max-w-xs shadow-lg p-6"):
             ui.label("Admin Login").classes("text-h6 mb-2")
             pwd = ui.input("Password", password=True).classes("w-full")
 
@@ -207,21 +207,32 @@ async def admin_page():
             ui.button("Login", on_click=login).classes("w-full mt-2")
         return
 
-    with ui.header().classes("bg-slate-900 items-center justify-between p-4"):
+    with ui.header().classes("bg-slate-900 items-center justify-between p-4 flex-wrap"):
         ui.label("Admin Panel").classes("text-xl text-white")
-        with ui.row():
+        with ui.row().classes("items-center"):
+            ui.button(icon="home", on_click=lambda: ui.navigate.to("/")).props(
+                "flat color=white"
+            ).classes("sm:hidden")
             ui.button("Home", on_click=lambda: ui.navigate.to("/")).props(
                 "flat color=white"
-            )
+            ).classes("hidden sm:block")
+
+            ui.button(
+                icon="logout",
+                on_click=lambda: (
+                    app.storage.user.update({"authenticated": False}),
+                    ui.navigate.to("/"),
+                ),
+            ).props("flat color=white").classes("sm:hidden")
             ui.button(
                 "Logout",
                 on_click=lambda: (
                     app.storage.user.update({"authenticated": False}),
                     ui.navigate.to("/"),
                 ),
-            ).props("flat color=white")
+            ).props("flat color=white").classes("hidden sm:block")
 
-    with ui.column().classes("p-8 w-full max-w-2xl mx-auto"):
+    with ui.column().classes("p-4 sm:p-8 w-full max-w-2xl mx-auto"):
         ui.label("Settings").classes("text-2xl mb-4")
         current_name = await get_setting("site_name", settings.SITE_NAME)
         name_input = ui.input("Site Name", value=current_name).classes("w-full")
@@ -245,4 +256,9 @@ async def admin_page():
 
 
 # 启动，指定端口为 7860
-ui.run(title="ToolBox", storage_secret="dynamic-key-placeholder", port=7860)  # nosec
+ui.run(
+    title="ToolBox",
+    storage_secret="dynamic-key-placeholder",
+    port=7860,
+    viewport="width=device-width, initial-scale=1",
+)  # nosec
