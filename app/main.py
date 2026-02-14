@@ -3,7 +3,7 @@ import importlib
 import inspect
 import asyncio
 from datetime import datetime
-from fastapi import Request
+from fastapi import Request, Response
 from nicegui import app, ui
 from pydantic import BaseModel
 import bcrypt
@@ -14,6 +14,19 @@ from app.models.models import Guest, User, AppSetting
 from app.core.config import settings
 from app.modules.base import BaseModule
 from app.core.settings_manager import get_setting, set_setting, get_or_create_secret_key
+
+
+# --- 缓存控制 ---
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response: Response = await call_next(request)
+    response.headers[
+        "Cache-Control"
+    ] = "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
 
 # --- 安全与认证配置 ---
 
