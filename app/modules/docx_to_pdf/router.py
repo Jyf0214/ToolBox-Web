@@ -100,6 +100,23 @@ class DocxToPdfModule(BaseModule):
             "上传 `.docx` 文件，使用 LibreOffice 将其转换为高质量的 PDF 文件。"
         ).classes("mb-4")
 
+        # 错误日志对话框
+        with ui.dialog() as error_dialog, ui.card().classes("w-full max-w-2xl"):
+            ui.label("详细错误日志").classes("text-h6")
+            error_log_area = ui.textarea().classes("w-full h-64").props("readonly")
+            with ui.row().classes("w-full justify-end mt-4"):
+                ui.button("关闭", on_click=error_dialog.close).props("flat")
+                ui.button(
+                    "复制日志",
+                    on_click=lambda: ui.run_javascript(
+                        f"navigator.clipboard.writeText({repr(error_log_area.value)})"
+                    ),
+                ).props("icon=content_copy")
+
+        def show_error_report(msg: str):
+            error_log_area.value = msg
+            error_dialog.open()
+
         with ui.card().classes("w-full max-w-xl p-6"):
             # 使用字典存储状态
             state = {"name": "", "content": None}
@@ -141,6 +158,12 @@ class DocxToPdfModule(BaseModule):
                     libreoffice_path = (
                         shutil.which("libreoffice") or "/usr/bin/libreoffice"
                     )
+
+                    if not os.path.exists(libreoffice_path):
+                        raise FileNotFoundError(
+                            f"LibreOffice not found at {libreoffice_path}. Please ensure it is installed."
+                        )
+
                     result = subprocess.run(
                         [
                             libreoffice_path,
@@ -168,9 +191,25 @@ class DocxToPdfModule(BaseModule):
                                 "text-lg text-primary underline"
                             )
                     else:
-                        ui.notify(f"转换失败: {result.stderr}", color="negative")
+                        error_detail = f"LibreOffice Error (Code {result.returncode}):\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+                        ui.notify(
+                            "转换失败",
+                            color="negative",
+                            on_click=lambda: show_error_report(error_detail),
+                        )
+                        show_error_report(error_detail)
                 except Exception as ex:
-                    ui.notify(f"出错: {ex}", color="negative")
+                    import traceback
+
+                    error_detail = (
+                        f"Exception: {str(ex)}\n\nTraceback:\n{traceback.format_exc()}"
+                    )
+                    ui.notify(
+                        "程序出错",
+                        color="negative",
+                        on_click=lambda: show_error_report(error_detail),
+                    )
+                    show_error_report(error_detail)
                 finally:
                     processing_dialog.close()
                     if input_path and os.path.exists(input_path):
@@ -187,7 +226,9 @@ class DocxToPdfModule(BaseModule):
                     ui.notify(f"已上传: {e.name}", color="positive")
                     convert_btn.enable()
                 except Exception as ex:
-                    ui.notify(f"处理上传文件失败: {ex}", color="negative")
+                    error_msg = f"Upload Handling Error: {str(ex)}"
+                    ui.notify("文件处理失败", color="negative")
+                    show_error_report(error_msg)
 
             def handle_rejected(e):
                 ui.notify(f"文件上传被拒绝: {e}", color="negative")
