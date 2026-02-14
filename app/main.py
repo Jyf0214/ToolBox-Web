@@ -1,4 +1,3 @@
-import os
 import asyncio
 from fastapi import Request, Response
 from nicegui import app, ui
@@ -9,6 +8,7 @@ from app.api.tracking import setup_tracking_api
 from app.ui.setup import create_setup_page
 from app.ui.main_page import create_main_page
 from app.ui.admin import create_admin_page
+from app.core.settings_manager import get_local_secret
 
 
 # --- 缓存控制中间件 ---
@@ -56,7 +56,7 @@ create_admin_page(
 # --- 启动应用 ---
 ui.run(
     title=f"工具箱 v{settings.VERSION}",
-    storage_secret=settings._SECRET_KEY or os.urandom(32).hex(),
+    storage_secret=get_local_secret(),
     port=7860,
     viewport="width=device-width, initial-scale=1",
 )

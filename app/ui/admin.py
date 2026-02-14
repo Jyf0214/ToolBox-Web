@@ -35,17 +35,35 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                         )
                         return
 
-                    async with database.AsyncSessionLocal() as session:
-                        result = await session.execute(
-                            select(User).where(User.is_admin)
-                        )
-                        admin = result.scalars().first()
-                        if admin and verify_password(pwd.value, admin.hashed_password):
-                            app.storage.user.update({"authenticated": True})
-                            ui.navigate.to("/admin")
-                        else:
-                            ui.notify("凭据无效", color="negative")
+                    if not pwd.value:
+                        ui.notify("请输入密码", color="warning")
+                        return
 
+                    try:
+                        async with database.AsyncSessionLocal() as session:
+                            # 查找管理员用户
+                            result = await session.execute(
+                                select(User).where(User.is_admin)
+                            )
+                            admin = result.scalars().first()
+
+                            if admin:
+                                if verify_password(pwd.value, admin.hashed_password):
+                                    app.storage.user.update({"authenticated": True})
+                                    ui.notify("登录成功", color="positive")
+                                    ui.navigate.to("/admin")
+                                else:
+                                    ui.notify("密码错误", color="negative")
+                            else:
+                                ui.notify(
+                                    "未发现管理员账户，请尝试重新初始化",
+                                    color="negative",
+                                )
+                    except Exception as e:
+                        ui.notify(f"登录过程出错: {e}", color="negative")
+
+                # 绑定回车事件
+                pwd.on("keydown.enter", login)
                 ui.button("登录", on_click=login).classes("w-full mt-2")
             return
 
