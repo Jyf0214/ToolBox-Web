@@ -16,7 +16,7 @@ class DocxToPdfModule(BaseModule):
 
     @property
     def name(self):
-        return "Word to PDF"
+        return "Word 转 PDF"
 
     @property
     def icon(self):
@@ -28,14 +28,14 @@ class DocxToPdfModule(BaseModule):
             file_path = os.path.join(self.temp_dir, f"{file_id}.pdf")
             if os.path.exists(file_path):
                 return FileResponse(
-                    file_path, media_type="application/pdf", filename="converted.pdf"
+                    file_path, media_type="application/pdf", filename="转换结果.pdf"
                 )
-            return {"error": "File not found"}
+            return {"error": "未找到文件"}
 
     def setup_ui(self):
-        ui.label("Word to PDF Converter").classes("text-h4 mb-4")
+        ui.label("Word 转 PDF 转换器").classes("text-h4 mb-4")
         ui.markdown(
-            "Upload a `.docx` file to convert it to a high-quality PDF using LibreOffice (Office-compatible)."
+            "上传 `.docx` 文件，使用 LibreOffice 将其转换为高质量的 PDF 文件。"
         ).classes("mb-4")
 
         with ui.card().classes("w-full max-w-xl p-6"):
@@ -44,11 +44,11 @@ class DocxToPdfModule(BaseModule):
             async def handle_upload(e):
                 file_info["name"] = e.name
                 file_info["content"] = e.content
-                ui.notify(f"Uploaded: {e.name}")
+                ui.notify(f"已上传: {e.name}")
                 convert_btn.enable()
 
             ui.upload(
-                label="Choose .docx file",
+                label="选择 .docx 文件",
                 on_upload=handle_upload,
                 auto_upload=True,
             ).props('accept=".docx"').classes("w-full")
@@ -60,7 +60,7 @@ class DocxToPdfModule(BaseModule):
                 processing_dialog = ui.dialog()
                 with processing_dialog, ui.card():
                     ui.spinner(size="lg")
-                    ui.label("Converting... please wait.")
+                    ui.label("正在转换中... 请稍候。")
                 processing_dialog.open()
 
                 try:
@@ -92,26 +92,22 @@ class DocxToPdfModule(BaseModule):
                     )
 
                     if result.returncode == 0:
-                        ui.notify("Conversion successful!", color="positive")
+                        ui.notify("转换成功！", color="positive")
                         download_url = f"{self.router.prefix}/download/{file_id}"
                         with result_container:
-                            ui.link("Download PDF", download_url).classes(
+                            ui.link("下载 PDF", download_url).classes(
                                 "text-lg text-primary underline"
                             )
                     else:
-                        ui.notify(
-                            f"Conversion failed: {result.stderr}", color="negative"
-                        )
+                        ui.notify(f"转换失败: {result.stderr}", color="negative")
                 except Exception as ex:
-                    ui.notify(f"Error: {ex}", color="negative")
+                    ui.notify(f"出错: {ex}", color="negative")
                 finally:
                     processing_dialog.close()
                     if os.path.exists(input_path):
                         os.remove(input_path)
 
-            convert_btn = ui.button("Convert to PDF", on_click=convert).classes(
-                "w-full mt-4"
-            )
+            convert_btn = ui.button("开始转换", on_click=convert).classes("w-full mt-4")
             convert_btn.disable()
 
             result_container = ui.row().classes("mt-4 w-full justify-center")

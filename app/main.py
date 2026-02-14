@@ -88,21 +88,21 @@ def load_modules():
 @app.on_startup
 async def startup():
     try:
-        print("Initializing database engine and trying connection with SSL fallback...")
+        print("正在初始化数据库引擎并尝试通过 SSL 回退进行连接...")
         await asyncio.wait_for(
             create_engine_with_ssl_fallback(), timeout=20
         )  # 增加超时时间
         create_session_local()  # 创建 SessionLocal
-        print("Database engine and session created successfully.")
+        print("数据库引擎和会话创建成功。")
         state.db_connected = True  # 数据库连接成功
 
         # 尝试创建所有表
         async with AsyncSessionLocal() as session:
             await session.run_sync(Base.metadata.create_all)
-        print("Database tables created/checked successfully.")
+        print("数据库表创建/检查成功。")
 
     except Exception as e:
-        print(f"CRITICAL ERROR: Failed to initialize database: {e}")
+        print(f"严重错误：无法初始化数据库: {e}")
         traceback.print_exc()  # 打印完整的堆栈信息
         state.db_connected = False  # 数据库连接失败
         # 即使失败也释放事件，避免页面无限死锁
@@ -125,7 +125,7 @@ async def startup():
             )
 
     except Exception as e:
-        print(f"Error during post-initialization: {e}")
+        print(f"初始化后处理出错: {e}")
     finally:
         load_modules()  # 无论数据库连接成功与否，都加载模块
         state.initialized.set()  # 确保事件被设置，防止无限等待
@@ -141,7 +141,7 @@ async def get_or_create_guest(fingerprint: str, ip: str):
     try:
         await asyncio.wait_for(state.initialized.wait(), timeout=10)
     except asyncio.TimeoutError:
-        ui.notify("Database connection timeout.", color="negative")
+        ui.notify("数据库连接超时。", color="negative")
         return  # 数据库超时，访客追踪不可用
 
     if not state.db_connected:  # 数据库未连接，访客追踪不可用
@@ -177,27 +177,27 @@ async def setup_page():
         return
 
     with ui.card().classes("absolute-center w-[90vw] max-w-md shadow-lg p-6"):
-        ui.label("ToolBox Setup").classes("text-h5 text-center mb-4")
-        admin_username = ui.input("Admin Username", value="admin").classes("w-full")
+        ui.label("工具箱初始化设置").classes("text-h5 text-center mb-4")
+        admin_username = ui.input("管理员用户名", value="admin").classes("w-full")
         admin_password = ui.input(
-            "Admin Password", password=True, password_toggle_button=True
+            "管理员密码", password=True, password_toggle_button=True
         ).classes("w-full")
-        site_name_input = ui.input("Site Name", value="My ToolBox").classes("w-full")
+        site_name_input = ui.input("站点名称", value="我的工具箱").classes("w-full")
 
         async def complete_setup():
             try:
                 await asyncio.wait_for(state.initialized.wait(), timeout=10)
             except asyncio.TimeoutError:
-                ui.notify("Database connection timeout.", color="negative")
+                ui.notify("数据库连接超时。", color="negative")
                 return
 
             if not admin_username.value or not admin_password.value:
-                ui.notify("Fields cannot be empty", color="negative")
+                ui.notify("字段不能为空", color="negative")
                 return
 
             if not state.db_connected:
                 ui.notify(
-                    "Database is not connected. Cannot complete setup.",
+                    "数据库未连接，无法完成初始化设置。",
                     color="negative",
                 )
                 return
@@ -213,10 +213,10 @@ async def setup_page():
 
             await set_setting("site_name", site_name_input.value)
             state.needs_setup = False
-            ui.notify("Setup complete!", color="positive")
+            ui.notify("初始化完成！", color="positive")
             ui.navigate.to("/admin")
 
-        ui.button("Finish Setup", on_click=complete_setup).classes("w-full mt-4")
+        ui.button("完成设置", on_click=complete_setup).classes("w-full mt-4")
 
 
 @ui.page("/")
@@ -224,7 +224,7 @@ async def main_page(request: Request):
     try:
         await asyncio.wait_for(state.initialized.wait(), timeout=10)
     except asyncio.TimeoutError:
-        ui.notify("Database connection timeout.", color="negative")
+        ui.notify("数据库连接超时。", color="negative")
         ui.navigate.to(
             "/error?msg=Database%20connection%20timeout."
         )  # 可以创建一个错误页面显示
@@ -265,7 +265,7 @@ async def main_page(request: Request):
         ).disable() if not state.db_connected else None
 
     if not modules:
-        ui.label("No modules loaded.").classes("p-8 text-center w-full")
+        ui.label("未加载任何模块。").classes("p-8 text-center w-full")
     else:
         with ui.tabs().classes("w-full overflow-x-auto") as tabs:
             for m in modules:
@@ -281,7 +281,7 @@ async def admin_page():
     try:
         await asyncio.wait_for(state.initialized.wait(), timeout=10)
     except asyncio.TimeoutError:
-        ui.notify("Database connection timeout.", color="negative")
+        ui.notify("数据库连接超时。", color="negative")
         ui.navigate.to("/error?msg=Database%20connection%20timeout.")
         return
 
@@ -291,12 +291,12 @@ async def admin_page():
 
     if not is_authenticated():
         with ui.card().classes("absolute-center w-[90vw] max-w-xs shadow-lg p-6"):
-            ui.label("Admin Login").classes("text-h6 mb-2")
+            ui.label("管理登录").classes("text-h6 mb-2")
             if not state.db_connected:
-                ui.label(
-                    "Admin functions are unavailable (Database disconnected)."
-                ).classes("text-negative mb-4")
-            pwd = ui.input("Password", password=True).classes("w-full")
+                ui.label("管理功能不可用（数据库未连接）。").classes(
+                    "text-negative mb-4"
+                )
+            pwd = ui.input("密码", password=True).classes("w-full")
             pwd.disable() if not state.db_connected else None
 
             async def login():
@@ -307,20 +307,20 @@ async def admin_page():
                         app.storage.user.update({"authenticated": True})
                         ui.navigate.to("/admin")
                     else:
-                        ui.notify("Invalid Credentials", color="negative")
+                        ui.notify("凭据无效", color="negative")
 
-            ui.button("Login", on_click=login).classes(
+            ui.button("登录", on_click=login).classes(
                 "w-full mt-2"
             ).disable() if not state.db_connected else None
         return
 
     with ui.header().classes("bg-slate-900 items-center justify-between p-4 flex-wrap"):
-        ui.label("Admin Panel").classes("text-xl text-white")
+        ui.label("管理后台").classes("text-xl text-white")
         with ui.row().classes("items-center"):
             ui.button(icon="home", on_click=lambda: ui.navigate.to("/")).props(
                 "flat color=white"
             ).classes("sm:hidden")
-            ui.button("Home", on_click=lambda: ui.navigate.to("/")).props(
+            ui.button("首页", on_click=lambda: ui.navigate.to("/")).props(
                 "flat color=white"
             ).classes("hidden sm:block")
 
@@ -332,7 +332,7 @@ async def admin_page():
                 ),
             ).props("flat color=white").classes("sm:hidden")
             ui.button(
-                "Logout",
+                "登出",
                 on_click=lambda: (
                     app.storage.user.update({"authenticated": False}),
                     ui.navigate.to("/"),
@@ -340,36 +340,32 @@ async def admin_page():
             ).props("flat color=white").classes("hidden sm:block")
 
     with ui.column().classes("p-4 sm:p-8 w-full max-w-2xl mx-auto"):
-        ui.label("Settings").classes("text-2xl mb-4")
+        ui.label("设置").classes("text-2xl mb-4")
         current_name = await get_setting("site_name", settings.SITE_NAME)
 
         if not state.db_connected:  # 数据库未连接，设置功能禁用
-            ui.label("Settings are unavailable (Database disconnected).").classes(
-                "text-negative mb-4"
-            )
+            ui.label("设置不可用（数据库未连接）。").classes("text-negative mb-4")
             name_input = (
-                ui.input("Site Name", value=current_name).classes("w-full").disable()
+                ui.input("站点名称", value=current_name).classes("w-full").disable()
             )
-            ui.button(
-                "Save", on_click=lambda: ui.notify("Database disconnected.")
-            ).classes("mt-2").disable()
+            ui.button("保存", on_click=lambda: ui.notify("数据库未连接。")).classes(
+                "mt-2"
+            ).disable()
         else:
-            name_input = ui.input("Site Name", value=current_name).classes("w-full")
+            name_input = ui.input("站点名称", value=current_name).classes("w-full")
             ui.button(
-                "Save",
+                "保存",
                 on_click=lambda: (
                     set_setting("site_name", name_input.value),
-                    ui.notify("Saved"),
+                    ui.notify("已保存"),
                 ),
             ).classes("mt-2")
 
         ui.separator().classes("my-8")
-        ui.label("Recent Visitors").classes("text-2xl mb-4")
+        ui.label("最近访客").classes("text-2xl mb-4")
 
         if not state.db_connected:  # 数据库未连接，访客列表不可用
-            ui.label(
-                "Recent visitors list is unavailable (Database disconnected)."
-            ).classes("text-negative")
+            ui.label("最近访客列表不可用（数据库未连接）。").classes("text-negative")
         else:
             async with AsyncSessionLocal() as session:
                 guests = await session.execute(
@@ -378,13 +374,13 @@ async def admin_page():
                 for g in guests.scalars().all():
                     with ui.card().classes("w-full mb-2 p-4"):
                         ui.label(
-                            f"IP: {g.ip_address} | Last: {g.last_seen.strftime('%H:%M:%S')}"
+                            f"IP: {g.ip_address} | 最后访问: {g.last_seen.strftime('%Y-%m-%d %H:%M:%S')}"
                         )
 
 
 # 启动，指定端口为 7860
 ui.run(
-    title="ToolBox",
+    title="工具箱",
     storage_secret="dynamic-key-placeholder",
     port=7860,
     viewport="width=device-width, initial-scale=1",
