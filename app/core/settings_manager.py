@@ -1,6 +1,14 @@
+import secrets
 from sqlalchemy import select
 from app.core.database import AsyncSessionLocal
 from app.models.models import AppSetting
+
+async def get_or_create_secret_key() -> str:
+    key = await get_setting('secret_key')
+    if not key:
+        key = secrets.token_urlsafe(32)
+        await set_setting('secret_key', key)
+    return key
 
 async def get_setting(key: str, default: str = "") -> str:
     async with AsyncSessionLocal() as db:

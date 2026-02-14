@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+toolbox.db
+.git/
+.pre-commit-config.yaml
