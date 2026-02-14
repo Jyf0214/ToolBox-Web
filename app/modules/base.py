@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from fastapi import APIRouter
-from nicegui import ui
+
 
 class BaseModule(ABC):
     def __init__(self):
         self.id = self.__class__.__name__.lower()
         self.router = APIRouter(prefix=f"/api/{self.id}")
-        
+
     @property
     @abstractmethod
     def name(self):

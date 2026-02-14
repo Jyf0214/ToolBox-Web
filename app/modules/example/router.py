@@ -2,6 +2,7 @@ from app.modules.base import BaseModule
 from nicegui import ui
 import base64
 
+
 class ExampleModule(BaseModule):
     @property
     def name(self):
@@ -12,12 +13,13 @@ class ExampleModule(BaseModule):
         return "code"
 
     def setup_ui(self):
-        ui.label('Base64 Encoder/Decoder').classes('text-h4 mb-4')
-        
-        with ui.column().classes('w-full max-w-xl'):
-            input_text = ui.textarea('Input Text').classes('w-full')
-            
+        ui.label("Base64 Encoder/Decoder").classes("text-h4 mb-4")
+
+        with ui.column().classes("w-full max-w-xl"):
+            input_text = ui.textarea("Input Text").classes("w-full")
+
             with ui.row():
+
                 def encode():
                     try:
                         res = base64.b64encode(input_text.value.encode()).decode()
@@ -32,7 +34,7 @@ class ExampleModule(BaseModule):
                     except Exception as e:
                         ui.notify(f"Error: {e}")
 
-                ui.button('Encode', on_click=encode)
-                ui.button('Decode', on_click=decode, color='secondary')
+                ui.button("Encode", on_click=encode)
+                ui.button("Decode", on_click=decode, color="secondary")
 
-            output_text = ui.textarea('Result').classes('w-full mt-4').props('readonly')
+            output_text = ui.textarea("Result").classes("w-full mt-4").props("readonly")
