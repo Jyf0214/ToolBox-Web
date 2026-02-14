@@ -136,7 +136,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Check for print statements
         run: |
           # Exclude common dirs and check for print()

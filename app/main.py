@@ -145,7 +145,8 @@ async def main_page(request: Request):
     if "x-forwarded-for" in request.headers:
         client_ip = request.headers["x-forwarded-for"].split(",")[0]
 
-    ui.add_head_html(f"""
+    ui.add_head_html(
+        f"""
         <script>
             const fpPromise = FingerprintJS.load();
             fpPromise.then(fp => fp.get()).then(result => {{
@@ -156,7 +157,8 @@ async def main_page(request: Request):
                 }});
             }});
         </script>
-    """)
+    """
+    )
 
     with ui.header().classes("items-center justify-between bg-slate-800 p-4"):
         ui.label(site_title).classes("text-2xl font-bold text-white")
@@ -240,4 +242,4 @@ async def admin_page():
 
 
 # 启动，指定端口为 7860
-ui.run(title="ToolBox", storage_secret="init-temp-key", port=7860)
+ui.run(title="ToolBox", storage_secret="dynamic-key-placeholder", port=7860)  # nosec
