@@ -75,7 +75,8 @@ jobs:
   build-base:
     name: Build & Push Base Image
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: cleanup
+    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     outputs:
       base_updated: ${{ steps.filter.outputs.base }}
     steps:
