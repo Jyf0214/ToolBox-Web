@@ -1,6 +1,7 @@
 import os
 import importlib
 import inspect
+import asyncio
 from datetime import datetime
 from fastapi import Request
 from nicegui import app, ui
@@ -20,6 +21,7 @@ from app.core.settings_manager import get_setting, set_setting, get_or_create_se
 # 全局状态
 class State:
     needs_setup = True
+    initialized = asyncio.Event()
 
 
 state = State()
@@ -65,8 +67,13 @@ def load_modules():
 
 @app.on_startup
 async def startup():
-    # 初始化 Beanie
-    await init_beanie(database=db, document_models=[User, Guest, AppSetting])
+    try:
+        # 初始化 Beanie
+        await init_beanie(database=db, document_models=[User, Guest, AppSetting])
+        print("Beanie initialized successfully.")
+    except Exception as e:
+        print(f"Failed to initialize Beanie: {e}")
+        return
 
     settings._SECRET_KEY = await get_or_create_secret_key()
     app.storage.secret = settings._SECRET_KEY
@@ -75,6 +82,7 @@ async def startup():
     state.needs_setup = admin_exists is None
 
     load_modules()
+    state.initialized.set()
 
 
 # --- 游客逻辑 ---
@@ -84,6 +92,7 @@ class GuestData(BaseModel):
 
 
 async def get_or_create_guest(fingerprint: str, ip: str):
+    await state.initialized.wait()
     guest = await Guest.find_one(Guest.fingerprint == fingerprint)
     if not guest:
         guest = Guest(fingerprint=fingerprint, ip_address=ip)
@@ -118,6 +127,7 @@ async def setup_page():
         site_name_input = ui.input("Site Name", value="My ToolBox").classes("w-full")
 
         async def complete_setup():
+            await state.initialized.wait()
             if not admin_username.value or not admin_password.value:
                 ui.notify("Fields cannot be empty", color="negative")
                 return
@@ -139,6 +149,7 @@ async def setup_page():
 
 @ui.page("/")
 async def main_page(request: Request):
+    await state.initialized.wait()
     if state.needs_setup:
         ui.navigate.to("/setup")
         return
@@ -187,6 +198,7 @@ async def main_page(request: Request):
 
 @ui.page("/admin")
 async def admin_page():
+    await state.initialized.wait()
     if state.needs_setup:
         ui.navigate.to("/setup")
         return
