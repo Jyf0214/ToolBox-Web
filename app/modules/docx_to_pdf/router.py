@@ -220,13 +220,26 @@ class DocxToPdfModule(BaseModule):
 
             async def handle_upload(e):
                 try:
-                    state["name"] = e.name
-                    # 立即读取内容以防流关闭
-                    state["content"] = e.content.read()
-                    ui.notify(f"已上传: {e.name}", color="positive")
+                    # 尝试从不同可能的属性中获取文件名
+                    file_name = getattr(
+                        e, "name", getattr(e, "filename", "unknown.docx")
+                    )
+                    state["name"] = file_name
+
+                    # 立即读取内容
+                    if hasattr(e.content, "read"):
+                        state["content"] = e.content.read()
+                    else:
+                        state["content"] = e.content
+
+                    ui.notify(f"已上传: {file_name}", color="positive")
                     convert_btn.enable()
                 except Exception as ex:
-                    error_msg = f"Upload Handling Error: {str(ex)}"
+                    import traceback
+
+                    # 获取对象的属性列表以供调试
+                    attr_list = dir(e)
+                    error_msg = f"Upload Handling Error: {str(ex)}\n\nAvailable attributes on event object: {attr_list}\n\nTraceback:\n{traceback.format_exc()}"
                     ui.notify("文件处理失败", color="negative")
                     show_error_report(error_msg)
 
