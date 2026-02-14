@@ -1,5 +1,5 @@
-# 使用构建好的基础镜像
-FROM ghcr.io/jyf0214/toolbox-web-base:latest
+# 使用构建好的基础镜像标签 :base
+FROM ghcr.io/jyf0214/toolbox-web:base
 
 WORKDIR /app
 
