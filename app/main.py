@@ -18,6 +18,14 @@ from app.core.settings_manager import get_setting, set_setting, get_or_create_se
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
+# 全局状态
+class State:
+    needs_setup = True
+
+
+state = State()
+
+
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
@@ -61,7 +69,7 @@ async def startup():
     app.storage.secret = settings._SECRET_KEY
 
     admin_exists = await User.find_one(User.is_admin == True)  # noqa: E712
-    app.storage.extra["needs_setup"] = admin_exists is None
+    state.needs_setup = admin_exists is None
 
     load_modules()
 
@@ -94,7 +102,7 @@ async def track_guest(data: GuestData):
 
 @ui.page("/setup")
 async def setup_page():
-    if not app.storage.extra.get("needs_setup", True):
+    if not state.needs_setup:
         ui.navigate.to("/")
         return
 
@@ -119,7 +127,7 @@ async def setup_page():
             await user.insert()
 
             await set_setting("site_name", site_name_input.value)
-            app.storage.extra["needs_setup"] = False
+            state.needs_setup = False
             ui.notify("Setup complete!", color="positive")
             ui.navigate.to("/admin")
 
@@ -128,7 +136,7 @@ async def setup_page():
 
 @ui.page("/")
 async def main_page(request: Request):
-    if app.storage.extra.get("needs_setup", True):
+    if state.needs_setup:
         ui.navigate.to("/setup")
         return
 
@@ -176,7 +184,7 @@ async def main_page(request: Request):
 
 @ui.page("/admin")
 async def admin_page():
-    if app.storage.extra.get("needs_setup", True):
+    if state.needs_setup:
         ui.navigate.to("/setup")
         return
 
