@@ -27,15 +27,20 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
             with ui.card().classes("absolute-center w-[90vw] max-w-xs shadow-lg p-6"):
                 ui.label("管理登录").classes("text-h6 mb-2")
                 if not state.db_connected:
-                    ui.label("管理功能不可用（数据库未连接）。").classes(
-                        "text-negative mb-4"
+                    ui.label("注意：数据库当前未连接，登录将无法进行。").classes(
+                        "text-negative text-xs mb-4"
                     )
 
                 pwd = ui.input("密码", password=True).classes("w-full")
-                if not state.db_connected:
-                    pwd.disable()
 
                 async def login():
+                    if not state.db_connected:
+                        ui.notify(
+                            "无法登录：数据库连接失败，请检查数据库配置。",
+                            color="negative",
+                        )
+                        return
+
                     async with database.AsyncSessionLocal() as session:
                         result = await session.execute(
                             select(User).where(User.is_admin)
@@ -47,9 +52,7 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                         else:
                             ui.notify("凭据无效", color="negative")
 
-                ui.button("登录", on_click=login).classes(
-                    "w-full mt-2"
-                ).disable() if not state.db_connected else None
+                ui.button("登录", on_click=login).classes("w-full mt-2")
             return
 
         # --- 管理界面头部 ---
