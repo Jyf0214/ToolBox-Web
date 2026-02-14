@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import Request
 from nicegui import app, ui
 from pydantic import BaseModel
-from passlib.context import CryptContext
+import bcrypt
 from beanie import init_beanie
 
 from app.core.database import db
@@ -15,7 +15,6 @@ from app.modules.base import BaseModule
 from app.core.settings_manager import get_setting, set_setting, get_or_create_secret_key
 
 # --- 安全与认证配置 ---
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # 全局状态
@@ -27,11 +26,15 @@ state = State()
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    # 使用 bcrypt 直接哈希
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    # 使用 bcrypt 验证
+    return bcrypt.checkpw(
+        plain_password.encode("utf-8"), hashed_password.encode("utf-8")
+    )
 
 
 def is_authenticated() -> bool:

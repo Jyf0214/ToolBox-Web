@@ -2,7 +2,8 @@ nicegui
 motor
 beanie
 python-dotenv
-passlib[bcrypt]
+bcrypt==4.0.1
+passlib
 python-jose[cryptography]
 pydantic
 pydantic-settings
