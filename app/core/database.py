@@ -22,12 +22,19 @@ async def create_engine_with_ssl_fallback():
 
     db_url = settings.DATABASE_URL
 
-    # 确保是 MySQL URL
-    if not db_url.startswith("mysql+asyncmy://"):
+    # 确保是 MySQL URL 并使用正确的异步驱动
+    if db_url.startswith("mysql://"):
+        db_url = db_url.replace("mysql://", "mysql+asyncmy://", 1)
+        logger.info(
+            f"Automatically updated database URL schema to: {db_url.split('@')[-1]}"
+        )  # 只打印主机部分以保护敏感信息
+    elif not db_url.startswith("mysql+asyncmy://"):
         logger.error(
-            f"Unsupported database URL schema: {db_url}. Expected mysql+asyncmy://"
+            f"Unsupported database URL schema: {db_url}. Expected mysql+asyncmy:// or mysql://"
         )
-        raise ValueError("Unsupported database URL schema. Expected mysql+asyncmy://")
+        raise ValueError(
+            "Unsupported database URL schema. Expected mysql+asyncmy:// or mysql://"
+        )
 
     # 解析 URL 以便手动修改 SSL 参数
     from sqlalchemy.engine import URL
