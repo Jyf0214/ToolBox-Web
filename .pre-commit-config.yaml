@@ -18,4 +18,4 @@ repos:
     rev: 1.7.6
     hooks:
       - id: bandit
-        args: ["-r", "-ll", "app"]
+        args: ["-r", "--ignore-nosec", "-ll", "app"]

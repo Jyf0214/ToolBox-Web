@@ -62,9 +62,18 @@ jobs:
           ruff check .
           ruff format --check .
 
-      - name: Security Check (Bandit)
-        run: |
-          bandit -r app -lll
+            - name: Security Check (Bandit)
+              run: |
+                # 1. 检查中高风险 (无视 #nosec)，发现即失败
+                bandit -r app --ignore-nosec -ll || exit 1
+
+                # 2. 统计所有问题 (包括低风险，无视 #nosec)
+                TOTAL_ISSUES=$(bandit -r app --ignore-nosec -l -f custom --msg-template "{severity}" 2>/dev/null | grep -c -E "LOW|MEDIUM|HIGH" || echo 0)
+                echo "Total security issues found (ignoring #nosec): $TOTAL_ISSUES"
+                if [ "$TOTAL_ISSUES" -gt 5 ]; then
+            echo "::error::Security check failed: Found $TOTAL_ISSUES issues, which exceeds the limit of 5."
+            exit 1
+          fi
 
   deploy-docker:
     name: Build & Push Image
