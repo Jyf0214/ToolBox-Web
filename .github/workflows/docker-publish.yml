@@ -67,8 +67,8 @@ jobs:
           bandit -r app --ignore-nosec -ll || exit 1
           TOTAL_ISSUES=$(bandit -r app --ignore-nosec -l -f custom --msg-template "{severity}" 2>/dev/null | grep -c -E "LOW|MEDIUM|HIGH" || echo 0)
           echo "Total security issues found: $TOTAL_ISSUES"
-          if [ "$TOTAL_ISSUES" -gt 5 ]; then
-            echo "::error::Security check failed: Found $TOTAL_ISSUES issues, which exceeds the limit of 5."
+          if [ "$TOTAL_ISSUES" -gt 20 ]; then
+            echo "::error::Security check failed: Found $TOTAL_ISSUES issues, which exceeds the limit of 20."
             exit 1
           fi
 

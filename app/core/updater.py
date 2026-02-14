@@ -9,7 +9,7 @@ def is_git_available() -> bool:
     try:
         result = subprocess.run(
             ["git", "--version"], capture_output=True, text=True, timeout=5
-        )
+        )  # nosec B603 B607
         return result.returncode == 0
     except Exception:
         return False
