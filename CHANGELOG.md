@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-02-14
+
+### Fixed
+- Fixed `AttributeError: type object 'URL' has no attribute 'create_from_string'` by replacing it with `sqlalchemy.engine.make_url`.
+
 ## [0.1.1] - 2026-02-14
 
 ### Fixed
