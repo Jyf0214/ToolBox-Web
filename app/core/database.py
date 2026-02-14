@@ -37,9 +37,9 @@ async def create_engine_with_ssl_fallback():
         )
 
     # 解析 URL 以便手动修改 SSL 参数
-    from sqlalchemy.engine import URL
+    from sqlalchemy.engine import make_url
 
-    parsed_url = URL.create_from_string(db_url)
+    parsed_url = make_url(db_url)
 
     # 尝试连接 - 优先级 1: 默认 SSL (driver-dependent, 通常启用)
     try:
