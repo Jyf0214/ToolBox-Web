@@ -1,73 +1,64 @@
 import os
+import subprocess
 from typing import Optional, Tuple
 
-from git import Repo, GitCommandError
 
-
-def get_repo(cwd: Optional[str] = None) -> Optional[Repo]:
-    """获取 git 仓库对象"""
+# 检查 git 是否可用
+def is_git_available() -> bool:
+    """检查 git 命令是否可用"""
     try:
-        return Repo(cwd or os.getcwd())
+        result = subprocess.run(
+            ["git", "--version"], capture_output=True, text=True, timeout=5
+        )
+        return result.returncode == 0
     except Exception:
-        return None
+        return False
+
+
+# 全局标志，表示 git 是否可用
+GIT_AVAILABLE = is_git_available()
 
 
 def run_git_command(command: list[str], cwd: Optional[str] = None) -> Tuple[bool, str]:
     """运行 git 命令并返回结果"""
-    repo = get_repo(cwd)
-    if not repo:
-        return False, "无法获取 git 仓库"
+    if not GIT_AVAILABLE:
+        return False, "Git 命令不可用"
 
     try:
-        # 使用 GitPython 的 git 命令执行
-        git = repo.git
-        cmd_name = command[0] if command else "git"
-        if cmd_name != "git":
-            return False, f"Unknown command: {cmd_name}"
-
-        # 构建 GitPython 命令
-        git_args = command[1:]
-        if not git_args:
-            return True, ""
-
-        # 执行命令
-        result = git.execute(["git"] + git_args)
-        return True, result
-    except GitCommandError as e:
-        return False, str(e)
+        result = subprocess.run(
+            command, cwd=cwd or os.getcwd(), capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            return True, result.stdout.strip()
+        else:
+            return False, result.stderr.strip()
+    except subprocess.TimeoutExpired:
+        return False, "命令执行超时"
     except Exception as e:
         return False, str(e)
 
 
 def get_current_commit() -> Tuple[bool, str]:
     """获取当前本地 commit hash"""
-    repo = get_repo()
-    if repo:
-        try:
-            return True, repo.head.commit.hexsha
-        except Exception as e:
-            return False, str(e)
-    return False, "无法获取 git 仓库"
+    if not GIT_AVAILABLE:
+        return False, "Git 命令不可用"
+    return run_git_command(["git", "rev-parse", "HEAD"])
 
 
 def get_remote_commit() -> Tuple[bool, str]:
     """获取远程最新 commit hash"""
-    remote_url = "https://github.com/Jyf0214/ToolBox-Web.git"
+    if not GIT_AVAILABLE:
+        return False, "Git 命令不可用"
 
-    repo = get_repo()
-    if not repo:
-        return False, "无法获取 git 仓库"
+    # 使用 HTTP 链接获取远程分支信息
+    success, output = run_git_command(
+        ["git", "fetch", "https://github.com/Jyf0214/ToolBox-Web.git", "main"]
+    )
+    if not success:
+        return False, f"获取远程信息失败: {output}"
 
-    try:
-        # 获取远程信息
-        repo.git.fetch(remote_url, "main")
-        # 获取 FETCH_HEAD 的 commit
-        fetch_head = repo.git.rev_parse("FETCH_HEAD")
-        return True, fetch_head
-    except GitCommandError as e:
-        return False, f"获取远程信息失败: {e}"
-    except Exception as e:
-        return False, str(e)
+    # 获取远程 HEAD 的 commit hash
+    return run_git_command(["git", "rev-parse", "FETCH_HEAD"])
 
 
 def check_for_updates() -> Tuple[bool, str, str, str]:
@@ -75,6 +66,9 @@ def check_for_updates() -> Tuple[bool, str, str, str]:
     检查是否有更新
     返回: (是否有更新, 本地 commit, 远程 commit, 消息)
     """
+    if not GIT_AVAILABLE:
+        return False, "", "", "Git 命令不可用，无法检查更新"
+
     # 获取当前 commit
     success_local, local_commit = get_current_commit()
     if not success_local:
@@ -94,28 +88,26 @@ def check_for_updates() -> Tuple[bool, str, str, str]:
 
 def pull_updates() -> Tuple[bool, str]:
     """拉取并应用更新"""
-    remote_url = "https://github.com/Jyf0214/ToolBox-Web.git"
+    if not GIT_AVAILABLE:
+        return False, "Git 命令不可用，无法更新"
 
-    repo = get_repo()
-    if not repo:
-        return False, "无法获取 git 仓库"
-
-    try:
-        # 使用 GitPython 拉取更新
-        repo.git.pull(remote_url, "main")
+    # 使用 HTTP 链接拉取更新
+    success, output = run_git_command(
+        ["git", "pull", "https://github.com/Jyf0214/ToolBox-Web.git", "main"]
+    )
+    if success:
         return True, "更新成功"
-    except GitCommandError as e:
-        return False, f"更新失败: {e}"
-    except Exception as e:
-        return False, f"更新失败: {e}"
+    else:
+        return False, f"更新失败: {output}"
 
 
 def get_latest_commit_message() -> Tuple[bool, str]:
     """获取最新提交的日志信息"""
-    repo = get_repo()
-    if repo:
-        try:
-            return True, repo.head.commit.message.strip()
-        except Exception as e:
-            return False, str(e)
-    return False, "无法获取 git 仓库"
+    if not GIT_AVAILABLE:
+        return False, "Git 命令不可用"
+
+    success, output = run_git_command(["git", "log", "-1", "--pretty=format:%s"])
+    if success:
+        return True, output
+    else:
+        return False, f"获取日志失败: {output}"

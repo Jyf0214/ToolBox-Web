@@ -3,13 +3,14 @@ FROM python:3.11-slim
 # 设置环境变量防止交互式弹窗
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 安装系统包：构建工具、LibreOffice 和中文字体
+# 安装系统包：构建工具、LibreOffice、中文字体和 git
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
     libreoffice \
     fonts-wqy-zenhei \
     fonts-wqy-microhei \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # 基础镜像不拷贝代码，不安装 pip 依赖

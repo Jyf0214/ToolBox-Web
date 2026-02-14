@@ -138,38 +138,35 @@ async def startup():
         print("数据库表创建/检查成功。")
 
     except Exception as e:
-        print(f"严重错误：无法初始化数据库: {e}")
-        traceback.print_exc()  # 打印完整的堆栈信息
-        state.db_connected = False  # 数据库连接失败
-        # 即使失败也释放事件，避免页面无限死锁
-        state.initialized.set()  # 确保事件被设置，防止无限等待
-        return
+        print(f"数据库连接失败: {e}")
+        traceback.print_exc()
+        state.db_connected = False
+        print("将继续在无数据库模式下运行，游客功能可用")
 
-    try:
-        settings._SECRET_KEY = await get_or_create_secret_key()
-        app.storage.secret = settings._SECRET_KEY
+    # 只有在数据库连接成功时才检查管理员是否存在，否则强制进入访客模式
+    if state.db_connected:
+        try:
+            settings._SECRET_KEY = await get_or_create_secret_key()
+            app.storage.secret = settings._SECRET_KEY
 
-        # 只有在数据库连接成功时才检查管理员是否存在，否则强制进入访客模式
-        if state.db_connected:
             async with database.AsyncSessionLocal() as session:
                 result = await session.execute(select(User).where(User.is_admin))
                 admin_exists = result.scalars().first() is not None
             state.needs_setup = admin_exists is None
-        else:
-            state.needs_setup = (
-                False  # 数据库未连接，不进行 setup 流程，直接进入访客模式
-            )
+        except Exception as e:
+            print(f"初始化管理员检查失败: {e}")
+            state.needs_setup = False  # 出错时也不进行设置
+    else:
+        state.needs_setup = False  # 数据库未连接，不进行 setup 流程，直接进入访客模式
 
-    except Exception as e:
-        print(f"初始化后处理出错: {e}")
-    finally:
-        load_modules()  # 无论数据库连接成功与否，都加载模块
-        await sync_modules_with_db()
-        # 设置每个模块的 API 并包含路由
-        for m in modules:
-            m.setup_api()
-            app.include_router(m.router)
-        state.initialized.set()  # 确保事件被设置，防止无限等待
+    # 无论数据库连接成功与否，都加载模块并初始化应用
+    load_modules()
+    await sync_modules_with_db()
+    # 设置每个模块的 API 并包含路由
+    for m in modules:
+        m.setup_api()
+        app.include_router(m.router)
+    state.initialized.set()  # 确保事件被设置，防止无限等待
 
 
 # --- 游客逻辑 ---
