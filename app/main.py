@@ -35,6 +35,7 @@ async def add_no_cache_headers(request: Request, call_next):
 class State:
     needs_setup = True
     initialized = asyncio.Event()
+    db_connected = False  # 新增：数据库连接状态
 
 
 state = State()
@@ -105,7 +106,8 @@ async def startup():
     except Exception as e:
         print(f"Error during post-initialization: {e}")
     finally:
-        state.initialized.set()
+        load_modules()  # 无论数据库连接成功与否，都加载模块
+        state.initialized.set()  # 确保事件被设置，防止无限等待
 
 
 # --- 游客逻辑 ---
@@ -216,7 +218,7 @@ async def main_page(request: Request):
         ui.label(site_title).classes("text-2xl font-bold text-white")
         ui.button(icon="settings", on_click=lambda: ui.navigate.to("/admin")).props(
             "flat color=white"
-        )
+        ).disable() if not state.db_connected else None
 
     if not modules:
         ui.label("No modules loaded.").classes("p-8 text-center w-full")
@@ -243,7 +245,12 @@ async def admin_page():
     if not is_authenticated():
         with ui.card().classes("absolute-center w-[90vw] max-w-xs shadow-lg p-6"):
             ui.label("Admin Login").classes("text-h6 mb-2")
+            if not state.db_connected:
+                ui.label(
+                    "Admin functions are unavailable (Database disconnected)."
+                ).classes("text-negative mb-4")
             pwd = ui.input("Password", password=True).classes("w-full")
+            pwd.disable() if not state.db_connected else None
 
             async def login():
                 admin = await User.find_one(User.is_admin == True)  # noqa: E712
@@ -253,7 +260,9 @@ async def admin_page():
                 else:
                     ui.notify("Invalid Credentials", color="negative")
 
-            ui.button("Login", on_click=login).classes("w-full mt-2")
+            ui.button("Login", on_click=login).classes(
+                "w-full mt-2"
+            ).disable() if not state.db_connected else None
         return
 
     with ui.header().classes("bg-slate-900 items-center justify-between p-4 flex-wrap"):
