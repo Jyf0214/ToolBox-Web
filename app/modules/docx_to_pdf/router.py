@@ -125,11 +125,25 @@ class DocxToPdfModule(BaseModule):
             async def handle_upload(e):
                 try:
                     # 在新版本 NiceGUI 中，信息存储在 e.file 中
-                    file_name = getattr(e.file, "filename", "unknown.docx")
+                    # 尝试多种可能的属性名来获取文件名
+                    file_name = "unknown.docx"
+                    if hasattr(e, "file"):
+                        # 依次尝试 filename, name, 以及 字符串化 e.file
+                        file_name = getattr(
+                            e.file,
+                            "filename",
+                            getattr(e.file, "name", "unknown.docx"),
+                        )
+                        # 如果是路径，只取最后的文件名部分
+                        file_name = os.path.basename(file_name)
+
                     state["name"] = file_name
 
+                    # 调试通知：显示 e.file 的所有属性，方便精确定位
+                    file_attrs = dir(e.file) if hasattr(e, "file") else "e.file missing"
+                    ui.notify(f"调试: e.file 属性 = {file_attrs}", duration=10)
+
                     # e.file.content 通常是一个 BinaryIO 或类似对象
-                    # 我们需要读取它的二进制内容
                     content = e.file.read()
 
                     # 某些版本的 NiceGUI 可能返回协程
