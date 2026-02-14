@@ -480,18 +480,18 @@ async def admin_page():
                                         ui.label("启用").classes("text-xs")
                                         ui.switch(
                                             value=t.is_enabled,
-                                            on_change=lambda e,
-                                            name=t.name: toggle_tool(
-                                                name, "is_enabled", e.value
+                                            on_change=lambda e, name=t.name: (
+                                                toggle_tool(name, "is_enabled", e.value)
                                             ),
                                         )
                                     with ui.column().classes("items-center"):
                                         ui.label("游客可用").classes("text-xs")
                                         ui.switch(
                                             value=t.is_guest_allowed,
-                                            on_change=lambda e,
-                                            name=t.name: toggle_tool(
-                                                name, "is_guest_allowed", e.value
+                                            on_change=lambda e, name=t.name: (
+                                                toggle_tool(
+                                                    name, "is_guest_allowed", e.value
+                                                )
                                             ),
                                         )
 
