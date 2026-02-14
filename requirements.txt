@@ -11,6 +11,5 @@ pydantic-settings
 ruff
 bandit
 pre-commit
-GitPython
-pypandoc
-aspose-words
+PyPDF2
+reportlab
