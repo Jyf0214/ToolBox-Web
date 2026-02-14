@@ -101,25 +101,18 @@ class DocxToPdfModule(BaseModule):
         ).classes("mb-4")
 
         with ui.card().classes("w-full max-w-xl p-6"):
-            file_info = {"name": "", "content": None}
+            # 使用字典存储状态
+            state = {"name": "", "content": None}
+
             add_blank_page = ui.checkbox(
                 "奇数页时自动添加空白页（使总页数为偶数）", value=True
             ).classes("mb-4")
 
-            async def handle_upload(e):
-                file_info["name"] = e.name
-                file_info["content"] = e.content
-                ui.notify(f"已上传: {e.name}")
-                convert_btn.enable()
-
-            ui.upload(
-                label="选择 .docx 文件",
-                on_upload=handle_upload,
-                auto_upload=True,
-            ).props('accept=".docx"').classes("w-full")
+            result_container = ui.row().classes("mt-4 w-full justify-center")
 
             async def convert():
-                if not file_info["content"]:
+                if not state["content"]:
+                    ui.notify("请先上传文件", color="warning")
                     return
 
                 input_path = None
@@ -135,21 +128,16 @@ class DocxToPdfModule(BaseModule):
                     input_path = os.path.join(self.temp_dir, f"{file_id}.docx")
                     output_path = os.path.join(self.temp_dir, f"{file_id}.pdf")
 
-                    # 将上传的内容写入临时文件
-                    content = file_info["content"].read()
+                    # 使用已读取的内容
                     with open(input_path, "wb") as f:
-                        f.write(content)
+                        f.write(state["content"])
 
-                    # 验证输入文件路径安全（防止目录遍历）
+                    # 验证输入文件路径安全
                     abs_input_path = os.path.abspath(input_path)
                     abs_temp_dir = os.path.abspath(self.temp_dir)
                     if not abs_input_path.startswith(abs_temp_dir):
                         raise ValueError("Invalid input path")
 
-                    # 调用 LibreOffice 进行转换
-                    # --headless: 无界面模式
-                    # --convert-to pdf: 目标格式
-                    # --outdir: 输出目录
                     libreoffice_path = (
                         shutil.which("libreoffice") or "/usr/bin/libreoffice"
                     )
@@ -169,12 +157,12 @@ class DocxToPdfModule(BaseModule):
                     )
 
                     if result.returncode == 0:
-                        # 检查是否需要添加空白页
                         if add_blank_page.value:
                             self._add_blank_page_if_needed(output_path, True)
 
                         ui.notify("转换成功！", color="positive")
                         download_url = f"{self.router.prefix}/download/{file_id}"
+                        result_container.clear()
                         with result_container:
                             ui.link("下载 PDF", download_url).classes(
                                 "text-lg text-primary underline"
@@ -191,4 +179,24 @@ class DocxToPdfModule(BaseModule):
             convert_btn = ui.button("开始转换", on_click=convert).classes("w-full mt-4")
             convert_btn.disable()
 
-            result_container = ui.row().classes("mt-4 w-full justify-center")
+            async def handle_upload(e):
+                try:
+                    state["name"] = e.name
+                    # 立即读取内容以防流关闭
+                    state["content"] = e.content.read()
+                    ui.notify(f"已上传: {e.name}", color="positive")
+                    convert_btn.enable()
+                except Exception as ex:
+                    ui.notify(f"处理上传文件失败: {ex}", color="negative")
+
+            def handle_rejected(e):
+                ui.notify(f"文件上传被拒绝: {e}", color="negative")
+
+            ui.upload(
+                label="选择 .docx 文件",
+                on_upload=handle_upload,
+                on_rejected=handle_rejected,
+                auto_upload=True,
+            ).props(
+                'accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"'
+            ).classes("w-full")
