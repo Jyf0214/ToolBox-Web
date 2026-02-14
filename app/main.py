@@ -9,17 +9,18 @@ from nicegui import app, ui
 from pydantic import BaseModel
 import bcrypt
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from app.core.database import (
     Base,
     AsyncSessionLocal,
     create_engine_with_ssl_fallback,
     create_session_local,
 )
-from app.models.models import Guest, User
+from app.models.models import Guest, User, Tool
 from app.core.config import settings
 from app.modules.base import BaseModule
 from app.core.settings_manager import get_setting, set_setting, get_or_create_secret_key
+from app.core.updater import check_for_updates, pull_updates, get_latest_commit_message
 
 
 # --- 缓存控制 ---
@@ -65,11 +66,15 @@ def is_authenticated() -> bool:
 
 # --- 模块加载 ---
 modules = []
+module_instances = {}
 
 
 def load_modules():
     modules.clear()
+    module_instances.clear()
     modules_dir = os.path.join(os.path.dirname(__file__), "modules")
+    if not os.path.exists(modules_dir):
+        return
     for item in os.listdir(modules_dir):
         if os.path.isdir(os.path.join(modules_dir, item)) and not item.startswith("_"):
             try:
@@ -80,9 +85,40 @@ def load_modules():
                         and issubclass(obj, BaseModule)
                         and obj is not BaseModule
                     ):
-                        modules.append(obj())
+                        instance = obj()
+                        modules.append(instance)
+                        module_instances[instance.id] = instance
             except Exception as e:
                 print(f"Failed to load module {item}: {e}")
+
+
+async def sync_modules_with_db():
+    if not state.db_connected:
+        return
+
+    async with AsyncSessionLocal() as session:
+        # 获取数据库中的所有模块
+        result = await session.execute(select(Tool))
+        db_tools = {t.name: t for t in result.scalars().all()}
+
+        # 同步当前加载的模块到数据库
+        current_module_ids = set()
+        for m in modules:
+            current_module_ids.add(m.id)
+            if m.id not in db_tools:
+                new_tool = Tool(
+                    name=m.id,
+                    display_name=m.name,
+                    is_enabled=m.default_enabled,
+                    is_guest_allowed=True,
+                )
+                session.add(new_tool)
+            else:
+                # 更新显示名称（如果发生变化）
+                if db_tools[m.id].display_name != m.name:
+                    db_tools[m.id].display_name = m.name
+
+        await session.commit()
 
 
 @app.on_startup
@@ -128,6 +164,11 @@ async def startup():
         print(f"初始化后处理出错: {e}")
     finally:
         load_modules()  # 无论数据库连接成功与否，都加载模块
+        await sync_modules_with_db()
+        # 设置每个模块的 API 并包含路由
+        for m in modules:
+            m.setup_api()
+            app.include_router(m.router)
         state.initialized.set()  # 确保事件被设置，防止无限等待
 
 
@@ -269,13 +310,36 @@ async def main_page(request: Request):
     if not modules:
         ui.label("未加载任何模块。").classes("p-8 text-center w-full")
     else:
-        with ui.tabs().classes("w-full overflow-x-auto") as tabs:
+        # 获取模块在数据库中的状态
+        enabled_modules = []
+        if state.db_connected:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(select(Tool))
+                db_tools = {t.name: t for t in result.scalars().all()}
+
+            is_admin = is_authenticated()
             for m in modules:
-                ui.tab(m.name, icon=m.icon)
-        with ui.tab_panels(tabs, value=modules[0].name).classes("w-full"):
-            for m in modules:
-                with ui.tab_panel(m.name):
-                    m.setup_ui()
+                tool_info = db_tools.get(m.id)
+                if tool_info:
+                    if not tool_info.is_enabled:
+                        continue
+                    if not is_admin and not tool_info.is_guest_allowed:
+                        continue
+                enabled_modules.append(m)
+        else:
+            # 数据库未连接时，默认显示所有加载的模块（作为降级方案）
+            enabled_modules = modules
+
+        if not enabled_modules:
+            ui.label("当前没有可用的工具。").classes("p-8 text-center w-full")
+        else:
+            with ui.tabs().classes("w-full overflow-x-auto") as tabs:
+                for m in enabled_modules:
+                    ui.tab(m.name, icon=m.icon)
+            with ui.tab_panels(tabs, value=enabled_modules[0].name).classes("w-full"):
+                for m in enabled_modules:
+                    with ui.tab_panel(m.name):
+                        m.setup_ui()
 
 
 @ui.page("/admin")
@@ -364,6 +428,156 @@ async def admin_page():
                     ui.notify("已保存"),
                 ),
             ).classes("mt-2")
+
+        ui.separator().classes("my-8")
+        with ui.row().classes("w-full items-center justify-between mb-4"):
+            ui.label("工具管理").classes("text-2xl")
+
+            async def handle_refresh():
+                load_modules()
+                await sync_modules_with_db()
+                ui.notify("已重新扫描模块文件夹")
+                ui.navigate.to("/admin")
+
+            ui.button("刷新工具列表", on_click=handle_refresh).props(
+                "flat icon=refresh"
+            )
+
+        if not state.db_connected:
+            ui.label("工具管理不可用（数据库未连接）。").classes("text-negative")
+        else:
+
+            async def toggle_tool(tool_name, field, value):
+                async with AsyncSessionLocal() as session:
+                    await session.execute(
+                        update(Tool)
+                        .where(Tool.name == tool_name)
+                        .values({field: value})
+                    )
+                    await session.commit()
+                ui.notify(f"已更新 {tool_name}")
+
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(select(Tool).order_by(Tool.id))
+                tools = result.scalars().all()
+
+                with ui.column().classes("w-full gap-4"):
+                    for t in tools:
+                        with ui.card().classes("w-full p-4"):
+                            with ui.row().classes(
+                                "w-full items-center justify-between"
+                            ):
+                                with ui.column():
+                                    ui.label(t.display_name).classes(
+                                        "text-lg font-bold"
+                                    )
+                                    ui.label(f"ID: {t.name}").classes(
+                                        "text-xs text-slate-500"
+                                    )
+
+                                with ui.row().classes("items-center gap-4"):
+                                    with ui.column().classes("items-center"):
+                                        ui.label("启用").classes("text-xs")
+                                        ui.switch(
+                                            value=t.is_enabled,
+                                            on_change=lambda e,
+                                            name=t.name: toggle_tool(
+                                                name, "is_enabled", e.value
+                                            ),
+                                        )
+                                    with ui.column().classes("items-center"):
+                                        ui.label("游客可用").classes("text-xs")
+                                        ui.switch(
+                                            value=t.is_guest_allowed,
+                                            on_change=lambda e,
+                                            name=t.name: toggle_tool(
+                                                name, "is_guest_allowed", e.value
+                                            ),
+                                        )
+
+        ui.separator().classes("my-8")
+        ui.label("系统更新").classes("text-2xl mb-4")
+
+        update_status_label = ui.label("点击检查更新按钮查看是否有新版本").classes(
+            "text-slate-600 mb-4"
+        )
+        update_info_label = ui.label("").classes("text-sm text-slate-500 mb-4")
+        update_button = ui.button("检查更新", color="primary")
+
+        async def handle_check_update():
+            update_button.disable()
+            update_status_label.set_text("正在检查更新...")
+            update_info_label.set_text("")
+
+            try:
+                (
+                    has_update,
+                    local_commit,
+                    remote_commit,
+                    message,
+                ) = await asyncio.get_event_loop().run_in_executor(
+                    None, check_for_updates
+                )
+
+                if has_update:
+                    update_status_label.set_text(f"{message}").classes(
+                        "text-positive font-bold"
+                    )
+                    update_info_label.set_text(
+                        f"本地版本: {local_commit} → 远程版本: {remote_commit}"
+                    )
+                    update_button.set_text("立即更新").props("color=positive")
+                    update_button.on_click(handle_pull_update)
+                else:
+                    update_status_label.set_text(message).classes("text-slate-600")
+                    if local_commit and remote_commit:
+                        update_info_label.set_text(f"当前版本: {local_commit}")
+            except Exception as e:
+                update_status_label.set_text(f"检查更新出错: {str(e)}").classes(
+                    "text-negative"
+                )
+            finally:
+                update_button.enable()
+
+        async def handle_pull_update():
+            update_button.disable()
+            update_status_label.set_text("正在拉取更新...")
+
+            try:
+                success, message = await asyncio.get_event_loop().run_in_executor(
+                    None, pull_updates
+                )
+
+                if success:
+                    # 获取最新提交的日志
+                    (
+                        log_success,
+                        log_message,
+                    ) = await asyncio.get_event_loop().run_in_executor(
+                        None, get_latest_commit_message
+                    )
+                    if log_success:
+                        update_status_label.set_text(
+                            f"更新成功！最新提交: {log_message}"
+                        ).classes("text-positive font-bold")
+                    else:
+                        update_status_label.set_text("更新成功！").classes(
+                            "text-positive font-bold"
+                        )
+                    update_button.set_text("重启应用以应用更新").props("color=warning")
+                    update_button.disable()
+                    ui.notify("更新完成，请重启应用", color="positive", timeout=5000)
+                else:
+                    update_status_label.set_text(message).classes("text-negative")
+                    update_button.set_text("重试更新").props("color=negative")
+            except Exception as e:
+                update_status_label.set_text(f"更新出错: {str(e)}").classes(
+                    "text-negative"
+                )
+            finally:
+                update_button.enable()
+
+        update_button.on_click(handle_check_update)
 
         ui.separator().classes("my-8")
         ui.label("最近访客").classes("text-2xl mb-4")
