@@ -81,21 +81,31 @@ def load_modules():
 @app.on_startup
 async def startup():
     try:
-        # 初始化 Beanie
-        await init_beanie(database=db, document_models=[User, Guest, AppSetting])
+        # 增加连接超时设置
+        print("Initializing Beanie...")
+        await asyncio.wait_for(
+            init_beanie(database=db, document_models=[User, Guest, AppSetting]),
+            timeout=15,
+        )
         print("Beanie initialized successfully.")
     except Exception as e:
-        print(f"Failed to initialize Beanie: {e}")
+        print(f"CRITICAL ERROR: Failed to initialize Beanie: {e}")
+        # 即使失败也释放事件，避免页面无限死锁
+        state.initialized.set()
         return
 
-    settings._SECRET_KEY = await get_or_create_secret_key()
-    app.storage.secret = settings._SECRET_KEY
+    try:
+        settings._SECRET_KEY = await get_or_create_secret_key()
+        app.storage.secret = settings._SECRET_KEY
 
-    admin_exists = await User.find_one(User.is_admin == True)  # noqa: E712
-    state.needs_setup = admin_exists is None
+        admin_exists = await User.find_one(User.is_admin == True)  # noqa: E712
+        state.needs_setup = admin_exists is None
 
-    load_modules()
-    state.initialized.set()
+        load_modules()
+    except Exception as e:
+        print(f"Error during post-initialization: {e}")
+    finally:
+        state.initialized.set()
 
 
 # --- 游客逻辑 ---
@@ -105,7 +115,10 @@ class GuestData(BaseModel):
 
 
 async def get_or_create_guest(fingerprint: str, ip: str):
-    await state.initialized.wait()
+    try:
+        await asyncio.wait_for(state.initialized.wait(), timeout=10)
+    except asyncio.TimeoutError:
+        ui.notify("Database connection timeout.", color="negative")
     guest = await Guest.find_one(Guest.fingerprint == fingerprint)
     if not guest:
         guest = Guest(fingerprint=fingerprint, ip_address=ip)
@@ -140,7 +153,12 @@ async def setup_page():
         site_name_input = ui.input("Site Name", value="My ToolBox").classes("w-full")
 
         async def complete_setup():
-            await state.initialized.wait()
+            try:
+                await asyncio.wait_for(state.initialized.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                ui.notify("Database connection timeout.", color="negative")
+                return
+
             if not admin_username.value or not admin_password.value:
                 ui.notify("Fields cannot be empty", color="negative")
                 return
@@ -162,7 +180,10 @@ async def setup_page():
 
 @ui.page("/")
 async def main_page(request: Request):
-    await state.initialized.wait()
+    try:
+        await asyncio.wait_for(state.initialized.wait(), timeout=10)
+    except asyncio.TimeoutError:
+        ui.notify("Database connection timeout.", color="negative")
     if state.needs_setup:
         ui.navigate.to("/setup")
         return
@@ -211,7 +232,10 @@ async def main_page(request: Request):
 
 @ui.page("/admin")
 async def admin_page():
-    await state.initialized.wait()
+    try:
+        await asyncio.wait_for(state.initialized.wait(), timeout=10)
+    except asyncio.TimeoutError:
+        ui.notify("Database connection timeout.", color="negative")
     if state.needs_setup:
         ui.navigate.to("/setup")
         return
