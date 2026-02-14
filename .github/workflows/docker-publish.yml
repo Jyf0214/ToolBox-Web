@@ -59,41 +59,18 @@ jobs:
 
       - name: Lint with Ruff
         run: |
-          # Check for linting errors
           ruff check .
-          # Check formatting
           ruff format --check .
 
       - name: Security Check (Bandit)
         run: |
           bandit -r app -lll
 
-  build-test:
-    name: Test Build
-    runs-on: ubuntu-latest
-    needs: [lint-and-security]
-    if: github.event_name == 'pull_request'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          tags: toolbox:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   deploy-docker:
     name: Build & Push Image
     runs-on: ubuntu-latest
     needs: [lint-and-security, version]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/'))
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
 
     steps:
       - uses: actions/checkout@v4
@@ -116,10 +93,10 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=tag
+            type=ref,event=pr
             type=semver,pattern={{version}}
             type=raw,value=${{ needs.version.outputs.version }}
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/develop' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
