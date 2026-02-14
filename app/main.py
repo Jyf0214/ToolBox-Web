@@ -2,15 +2,21 @@ import os
 import importlib
 import inspect
 import asyncio
+import traceback
 from datetime import datetime
 from fastapi import Request, Response
 from nicegui import app, ui
 from pydantic import BaseModel
 import bcrypt
-from beanie import init_beanie
 
-from app.core.database import db
-from app.models.models import Guest, User, AppSetting
+from sqlalchemy import select
+from app.core.database import (
+    Base,
+    AsyncSessionLocal,
+    create_engine_with_ssl_fallback,
+    create_session_local,
+)
+from app.models.models import Guest, User
 from app.core.config import settings
 from app.modules.base import BaseModule
 from app.core.settings_manager import get_setting, set_setting, get_or_create_secret_key
@@ -82,27 +88,42 @@ def load_modules():
 @app.on_startup
 async def startup():
     try:
-        # 增加连接超时设置
-        print("Initializing Beanie...")
+        print("Initializing database engine and trying connection with SSL fallback...")
         await asyncio.wait_for(
-            init_beanie(database=db, document_models=[User, Guest, AppSetting]),
-            timeout=15,
-        )
-        print("Beanie initialized successfully.")
+            create_engine_with_ssl_fallback(), timeout=20
+        )  # 增加超时时间
+        create_session_local()  # 创建 SessionLocal
+        print("Database engine and session created successfully.")
+        state.db_connected = True  # 数据库连接成功
+
+        # 尝试创建所有表
+        async with AsyncSessionLocal() as session:
+            await session.run_sync(Base.metadata.create_all)
+        print("Database tables created/checked successfully.")
+
     except Exception as e:
-        print(f"CRITICAL ERROR: Failed to initialize Beanie: {e}")
+        print(f"CRITICAL ERROR: Failed to initialize database: {e}")
+        traceback.print_exc()  # 打印完整的堆栈信息
+        state.db_connected = False  # 数据库连接失败
         # 即使失败也释放事件，避免页面无限死锁
-        state.initialized.set()
+        state.initialized.set()  # 确保事件被设置，防止无限等待
         return
 
     try:
         settings._SECRET_KEY = await get_or_create_secret_key()
         app.storage.secret = settings._SECRET_KEY
 
-        admin_exists = await User.find_one(User.is_admin == True)  # noqa: E712
-        state.needs_setup = admin_exists is None
+        # 只有在数据库连接成功时才检查管理员是否存在，否则强制进入访客模式
+        if state.db_connected:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(select(User).where(User.is_admin))
+                admin_exists = result.scalars().first() is not None
+            state.needs_setup = admin_exists is None
+        else:
+            state.needs_setup = (
+                False  # 数据库未连接，不进行 setup 流程，直接进入访客模式
+            )
 
-        load_modules()
     except Exception as e:
         print(f"Error during post-initialization: {e}")
     finally:
@@ -121,14 +142,23 @@ async def get_or_create_guest(fingerprint: str, ip: str):
         await asyncio.wait_for(state.initialized.wait(), timeout=10)
     except asyncio.TimeoutError:
         ui.notify("Database connection timeout.", color="negative")
-    guest = await Guest.find_one(Guest.fingerprint == fingerprint)
-    if not guest:
-        guest = Guest(fingerprint=fingerprint, ip_address=ip)
-        await guest.insert()
-    else:
-        guest.ip_address = ip
-        guest.last_seen = datetime.utcnow()
-        await guest.save()
+        return  # 数据库超时，访客追踪不可用
+
+    if not state.db_connected:  # 数据库未连接，访客追踪不可用
+        return
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Guest).where(Guest.fingerprint == fingerprint)
+        )
+        guest = result.scalars().first()
+        if not guest:
+            guest = Guest(fingerprint=fingerprint, ip_address=ip)
+            session.add(guest)
+        else:
+            guest.ip_address = ip
+            guest.last_seen = datetime.utcnow()
+        await session.commit()
 
 
 @app.post("/api/track_guest")
@@ -165,12 +195,21 @@ async def setup_page():
                 ui.notify("Fields cannot be empty", color="negative")
                 return
 
-            user = User(
-                username=admin_username.value,
-                hashed_password=get_password_hash(admin_password.value),
-                is_admin=True,
-            )
-            await user.insert()
+            if not state.db_connected:
+                ui.notify(
+                    "Database is not connected. Cannot complete setup.",
+                    color="negative",
+                )
+                return
+
+            async with AsyncSessionLocal() as session:
+                user = User(
+                    username=admin_username.value,
+                    hashed_password=get_password_hash(admin_password.value),
+                    is_admin=True,
+                )
+                session.add(user)
+                await session.commit()
 
             await set_setting("site_name", site_name_input.value)
             state.needs_setup = False
@@ -186,6 +225,11 @@ async def main_page(request: Request):
         await asyncio.wait_for(state.initialized.wait(), timeout=10)
     except asyncio.TimeoutError:
         ui.notify("Database connection timeout.", color="negative")
+        ui.navigate.to(
+            "/error?msg=Database%20connection%20timeout."
+        )  # 可以创建一个错误页面显示
+        return
+
     if state.needs_setup:
         ui.navigate.to("/setup")
         return
@@ -238,6 +282,9 @@ async def admin_page():
         await asyncio.wait_for(state.initialized.wait(), timeout=10)
     except asyncio.TimeoutError:
         ui.notify("Database connection timeout.", color="negative")
+        ui.navigate.to("/error?msg=Database%20connection%20timeout.")
+        return
+
     if state.needs_setup:
         ui.navigate.to("/setup")
         return
@@ -253,12 +300,14 @@ async def admin_page():
             pwd.disable() if not state.db_connected else None
 
             async def login():
-                admin = await User.find_one(User.is_admin == True)  # noqa: E712
-                if admin and verify_password(pwd.value, admin.hashed_password):
-                    app.storage.user.update({"authenticated": True})
-                    ui.navigate.to("/admin")
-                else:
-                    ui.notify("Invalid Credentials", color="negative")
+                async with AsyncSessionLocal() as session:
+                    admin = await session.execute(select(User).where(User.is_admin))
+                    admin = admin.scalars().first()
+                    if admin and verify_password(pwd.value, admin.hashed_password):
+                        app.storage.user.update({"authenticated": True})
+                        ui.navigate.to("/admin")
+                    else:
+                        ui.notify("Invalid Credentials", color="negative")
 
             ui.button("Login", on_click=login).classes(
                 "w-full mt-2"
@@ -293,24 +342,44 @@ async def admin_page():
     with ui.column().classes("p-4 sm:p-8 w-full max-w-2xl mx-auto"):
         ui.label("Settings").classes("text-2xl mb-4")
         current_name = await get_setting("site_name", settings.SITE_NAME)
-        name_input = ui.input("Site Name", value=current_name).classes("w-full")
-        ui.button(
-            "Save",
-            on_click=lambda: (
-                set_setting("site_name", name_input.value),
-                ui.notify("Saved"),
-            ),
-        ).classes("mt-2")
+
+        if not state.db_connected:  # 数据库未连接，设置功能禁用
+            ui.label("Settings are unavailable (Database disconnected).").classes(
+                "text-negative mb-4"
+            )
+            name_input = (
+                ui.input("Site Name", value=current_name).classes("w-full").disable()
+            )
+            ui.button(
+                "Save", on_click=lambda: ui.notify("Database disconnected.")
+            ).classes("mt-2").disable()
+        else:
+            name_input = ui.input("Site Name", value=current_name).classes("w-full")
+            ui.button(
+                "Save",
+                on_click=lambda: (
+                    set_setting("site_name", name_input.value),
+                    ui.notify("Saved"),
+                ),
+            ).classes("mt-2")
 
         ui.separator().classes("my-8")
         ui.label("Recent Visitors").classes("text-2xl mb-4")
 
-        guests = await Guest.find().sort("-last_seen").limit(10).to_list()
-        for g in guests:
-            with ui.card().classes("w-full mb-2 p-4"):
-                ui.label(
-                    f"IP: {g.ip_address} | Last: {g.last_seen.strftime('%H:%M:%S')}"
+        if not state.db_connected:  # 数据库未连接，访客列表不可用
+            ui.label(
+                "Recent visitors list is unavailable (Database disconnected)."
+            ).classes("text-negative")
+        else:
+            async with AsyncSessionLocal() as session:
+                guests = await session.execute(
+                    select(Guest).order_by(Guest.last_seen.desc()).limit(10)
                 )
+                for g in guests.scalars().all():
+                    with ui.card().classes("w-full mb-2 p-4"):
+                        ui.label(
+                            f"IP: {g.ip_address} | Last: {g.last_seen.strftime('%H:%M:%S')}"
+                        )
 
 
 # 启动，指定端口为 7860

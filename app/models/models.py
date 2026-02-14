@@ -1,33 +1,32 @@
-from typing import Optional
+from sqlalchemy import Column, Integer, String, JSON, DateTime, Boolean
 from datetime import datetime
-from beanie import Document, Indexed
-from pydantic import Field
+from app.core.database import Base
 
 
-class User(Document):
-    username: Indexed(str, unique=True)
-    hashed_password: str
-    is_admin: bool = False
-
-    class Settings:
-        name = "users"
-
-
-class Guest(Document):
-    ip_address: str
-    fingerprint: Indexed(str)
-    first_seen: datetime = Field(default_factory=datetime.utcnow)
-    last_seen: datetime = Field(default_factory=datetime.utcnow)
-    metadata_json: Optional[dict] = None
-
-    class Settings:
-        name = "guests"
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(
+        String(255), unique=True, index=True, nullable=False
+    )  # MySQL 需要指定 String 长度
+    hashed_password = Column(String(255), nullable=False)
+    is_admin = Column(Boolean, default=False, nullable=False)
 
 
-class AppSetting(Document):
-    key: Indexed(str, unique=True)
-    value: str
-    description: Optional[str] = None
+class Guest(Base):
+    __tablename__ = "guests"
+    id = Column(Integer, primary_key=True, index=True)
+    ip_address = Column(String(255), nullable=False)
+    fingerprint = Column(String(255), index=True, nullable=False)
+    first_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+    metadata_json = Column(JSON, nullable=True)
 
-    class Settings:
-        name = "settings"
+
+class AppSetting(Base):
+    __tablename__ = "settings"
+    key = Column(String(255), primary_key=True, nullable=False)
+    value = Column(String(255), nullable=False)
+    description = Column(String(255), nullable=True)
