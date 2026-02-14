@@ -28,5 +28,5 @@
 ## 技术栈
 
 - **UI/Server**: NiceGUI (FastAPI + Tailwind CSS)
-- **ORM**: SQLAlchemy (Async)
+- **ORM**: Beanie (MongoDB Async ODM)
 - **Tracking**: FingerprintJS v3

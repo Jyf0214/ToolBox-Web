@@ -7,7 +7,7 @@ load_dotenv()
 
 class Settings(BaseSettings):
     # 数据库 URL 是唯一允许的必需环境变量
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./toolbox.db")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "mongodb://localhost:27017/toolbox")
 
     # 以下配置将从数据库读取
     _SECRET_KEY: str = ""

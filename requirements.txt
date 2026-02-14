@@ -1,7 +1,6 @@
 nicegui
-sqlalchemy
-aiosqlite
-psycopg2-binary
+motor
+beanie
 python-dotenv
 passlib[bcrypt]
 python-jose[cryptography]

@@ -1,28 +1,33 @@
-from sqlalchemy import Column, Integer, String, JSON, DateTime, Boolean
+from typing import Optional
 from datetime import datetime
-from app.core.database import Base
+from beanie import Document, Indexed
+from pydantic import Field
 
 
-class User(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
-    is_admin = Column(Boolean, default=False)
+class User(Document):
+    username: Indexed(str, unique=True)
+    hashed_password: str
+    is_admin: bool = False
+
+    class Settings:
+        name = "users"
 
 
-class Guest(Base):
-    __tablename__ = "guests"
-    id = Column(Integer, primary_key=True, index=True)
-    ip_address = Column(String)
-    fingerprint = Column(String, index=True)
-    first_seen = Column(DateTime, default=datetime.utcnow)
-    last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    metadata_json = Column(JSON, nullable=True)  # 存储浏览器信息等
+class Guest(Document):
+    ip_address: str
+    fingerprint: Indexed(str)
+    first_seen: datetime = Field(default_factory=datetime.utcnow)
+    last_seen: datetime = Field(default_factory=datetime.utcnow)
+    metadata_json: Optional[dict] = None
+
+    class Settings:
+        name = "guests"
 
 
-class AppSetting(Base):
-    __tablename__ = "settings"
-    key = Column(String, primary_key=True)
-    value = Column(String)
-    description = Column(String, nullable=True)
+class AppSetting(Document):
+    key: Indexed(str, unique=True)
+    value: str
+    description: Optional[str] = None
+
+    class Settings:
+        name = "settings"

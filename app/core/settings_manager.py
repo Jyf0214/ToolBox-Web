@@ -1,6 +1,4 @@
 import secrets
-from sqlalchemy import select
-from app.core.database import AsyncSessionLocal
 from app.models.models import AppSetting
 
 
@@ -13,18 +11,15 @@ async def get_or_create_secret_key() -> str:
 
 
 async def get_setting(key: str, default: str = "") -> str:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(AppSetting).where(AppSetting.key == key))
-        setting = result.scalars().first()
-        return setting.value if setting else default
+    setting = await AppSetting.find_one(AppSetting.key == key)
+    return setting.value if setting else default
 
 
 async def set_setting(key: str, value: str):
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(AppSetting).where(AppSetting.key == key))
-        setting = result.scalars().first()
-        if setting:
-            setting.value = value
-        else:
-            db.add(AppSetting(key=key, value=value))
-        await db.commit()
+    setting = await AppSetting.find_one(AppSetting.key == key)
+    if setting:
+        setting.value = value
+        await setting.save()
+    else:
+        setting = AppSetting(key=key, value=value)
+        await setting.insert()

@@ -4,12 +4,12 @@ import inspect
 from datetime import datetime
 from fastapi import Request
 from nicegui import app, ui
-from sqlalchemy import select
 from pydantic import BaseModel
 from passlib.context import CryptContext
+from beanie import init_beanie
 
-from app.core.database import engine, Base, AsyncSessionLocal
-from app.models.models import Guest, User
+from app.core.database import db
+from app.models.models import Guest, User, AppSetting
 from app.core.config import settings
 from app.modules.base import BaseModule
 from app.core.settings_manager import get_setting, set_setting, get_or_create_secret_key
@@ -54,16 +54,14 @@ def load_modules():
 
 @app.on_startup
 async def startup():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # 初始化 Beanie
+    await init_beanie(database=db, document_models=[User, Guest, AppSetting])
 
     settings._SECRET_KEY = await get_or_create_secret_key()
     app.storage.secret = settings._SECRET_KEY
 
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(User).where(User.is_admin))
-        admin_exists = result.scalars().first() is not None
-        app.storage.extra["needs_setup"] = not admin_exists
+    admin_exists = await User.find_one(User.is_admin == True)  # noqa: E712
+    app.storage.extra["needs_setup"] = admin_exists is None
 
     load_modules()
 
@@ -75,16 +73,14 @@ class GuestData(BaseModel):
 
 
 async def get_or_create_guest(fingerprint: str, ip: str):
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Guest).where(Guest.fingerprint == fingerprint))
-        guest = result.scalars().first()
-        if not guest:
-            guest = Guest(fingerprint=fingerprint, ip_address=ip)
-            db.add(guest)
-        else:
-            guest.ip_address = ip
-            guest.last_seen = datetime.utcnow()
-        await db.commit()
+    guest = await Guest.find_one(Guest.fingerprint == fingerprint)
+    if not guest:
+        guest = Guest(fingerprint=fingerprint, ip_address=ip)
+        await guest.insert()
+    else:
+        guest.ip_address = ip
+        guest.last_seen = datetime.utcnow()
+        await guest.save()
 
 
 @app.post("/api/track_guest")
@@ -114,14 +110,14 @@ async def setup_page():
             if not admin_username.value or not admin_password.value:
                 ui.notify("Fields cannot be empty", color="negative")
                 return
-            async with AsyncSessionLocal() as db:
-                user = User(
-                    username=admin_username.value,
-                    hashed_password=get_password_hash(admin_password.value),
-                    is_admin=True,
-                )
-                db.add(user)
-                await db.commit()
+
+            user = User(
+                username=admin_username.value,
+                hashed_password=get_password_hash(admin_password.value),
+                is_admin=True,
+            )
+            await user.insert()
+
             await set_setting("site_name", site_name_input.value)
             app.storage.extra["needs_setup"] = False
             ui.notify("Setup complete!", color="positive")
@@ -190,14 +186,12 @@ async def admin_page():
             pwd = ui.input("Password", password=True).classes("w-full")
 
             async def login():
-                async with AsyncSessionLocal() as db:
-                    res = await db.execute(select(User).where(User.is_admin))
-                    admin = res.scalars().first()
-                    if admin and verify_password(pwd.value, admin.hashed_password):
-                        app.storage.user.update({"authenticated": True})
-                        ui.navigate.to("/admin")
-                    else:
-                        ui.notify("Invalid Credentials", color="negative")
+                admin = await User.find_one(User.is_admin == True)  # noqa: E712
+                if admin and verify_password(pwd.value, admin.hashed_password):
+                    app.storage.user.update({"authenticated": True})
+                    ui.navigate.to("/admin")
+                else:
+                    ui.notify("Invalid Credentials", color="negative")
 
             ui.button("Login", on_click=login).classes("w-full mt-2")
         return
@@ -230,15 +224,13 @@ async def admin_page():
 
         ui.separator().classes("my-8")
         ui.label("Recent Visitors").classes("text-2xl mb-4")
-        async with AsyncSessionLocal() as db:
-            res = await db.execute(
-                select(Guest).order_by(Guest.last_seen.desc()).limit(10)
-            )
-            for g in res.scalars().all():
-                with ui.card().classes("w-full mb-2 p-4"):
-                    ui.label(
-                        f"IP: {g.ip_address} | Last: {g.last_seen.strftime('%H:%M:%S')}"
-                    )
+
+        guests = await Guest.find().sort("-last_seen").limit(10).to_list()
+        for g in guests:
+            with ui.card().classes("w-full mb-2 p-4"):
+                ui.label(
+                    f"IP: {g.ip_address} | Last: {g.last_seen.strftime('%H:%M:%S')}"
+                )
 
 
 # 启动，指定端口为 7860
