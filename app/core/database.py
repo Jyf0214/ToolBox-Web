@@ -1,9 +1,9 @@
 import ssl
 import logging
+import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
 from app.core.config import settings
 
 # 配置日志
@@ -18,10 +18,26 @@ engine = None
 AsyncSessionLocal = None
 
 
+async def test_connection_with_timeout(db_url, connect_args, timeout=10.0):
+    """
+    在一个独立的任务中测试数据库连接，确保超时控制有效。
+    """
+    temp_engine = create_async_engine(
+        db_url, connect_args=connect_args, pool_pre_ping=True
+    )
+    try:
+        async with temp_engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return temp_engine
+    except Exception as e:
+        await temp_engine.dispose()
+        raise e
+
+
 async def create_engine_with_ssl_fallback():
     """
     创建数据库引擎，强制使用 SSL。
-    如果第一次握手因为证书不可信失败，则在下一次尝试中信任该证书。
+    如果第一次握手因为证书不可信失败或超时，则在下一次尝试中信任该证书。
     严禁使用非 SSL 连接。
     """
     global engine, AsyncSessionLocal
@@ -29,68 +45,39 @@ async def create_engine_with_ssl_fallback():
     db_url = settings.DATABASE_URL
 
     # 全局禁止不安全的连接方式
-    # 检查 DATABASE_URL 中是否包含试图禁用 SSL 的参数
     if "ssl=disabled" in db_url.lower() or "ssl=false" in db_url.lower():
-        logger.error(
-            "Insecure connection strings are banned. Please remove ssl=disabled or ssl=false."
-        )
+        print("CRITICAL: 检测到不安全的连接字符串配置，已拒绝。")
         raise ValueError("Insecure database connections are strictly prohibited.")
 
     # 第一次尝试：使用标准 SSL 验证
-    # connect_args={"ssl": True} 会强制启用 SSL
-    connect_args = {"ssl": True}
-
-    logger.info("Attempting to connect to database with mandatory SSL...")
+    print("\n[1/2] 正在尝试标准 SSL 连接... (超时设定: 10s)")
+    print(f"目标节点: {db_url.split('@')[-1]}")
 
     try:
-        temp_engine = create_async_engine(
-            db_url, connect_args=connect_args, pool_pre_ping=True
+        # 使用 wait_for 包装整个连接过程
+        engine = await asyncio.wait_for(
+            test_connection_with_timeout(db_url, {"ssl": True}), timeout=10.0
         )
-        # 测试连接
-        async with temp_engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-        engine = temp_engine
-        logger.info("Database connected successfully with verified SSL.")
-    except (OperationalError, Exception) as e:
-        error_msg = str(e)
-        # 捕获 SSL 证书验证失败相关的错误
-        if any(
-            err in error_msg
-            for err in [
-                "CERTIFICATE_VERIFY_FAILED",
-                "certificate verify failed",
-                "SSL certificate validation",
-            ]
-        ):
-            logger.warning(
-                "SSL certificate verification failed. Retrying with Trust-On-First-Use (trusting untrusted certificate)..."
+        print("SUCCESS: 标准 SSL 连接验证通过。")
+    except (asyncio.TimeoutError, Exception) as e:
+        error_msg = str(e) or "Connection Handshake Timeout"
+        print(f"反馈: 第一次连接尝试未通过。原因: {error_msg}")
+
+        # 第二次尝试：TOFU 模式
+        print("\n[2/2] 正在切换至 TOFU 模式 (信任证书并强制 SSL 加密)...")
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        try:
+            engine = await asyncio.wait_for(
+                test_connection_with_timeout(db_url, {"ssl": ctx}), timeout=15.0
             )
-
-            # 创建一个不验证 CA 的 SSL 上下文，但仍然加密
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-
-            connect_args_tofu = {"ssl": ctx}
-
-            try:
-                temp_engine_tofu = create_async_engine(
-                    db_url, connect_args=connect_args_tofu, pool_pre_ping=True
-                )
-                async with temp_engine_tofu.connect() as conn:
-                    await conn.execute(text("SELECT 1"))
-                engine = temp_engine_tofu
-                logger.info(
-                    "Database connected successfully with SSL (untrusted certificate accepted)."
-                )
-            except Exception as retry_e:
-                logger.error(
-                    f"Database connection failed even after trusting certificate: {retry_e}"
-                )
-                raise retry_e
-        else:
-            logger.error(f"Database connection failed: {error_msg}")
-            raise e
+            print("SUCCESS: TOFU 加密连接建立成功。")
+        except Exception as retry_e:
+            print(f"FATAL: 数据库所有加密连接尝试均失败: {retry_e}")
+            raise retry_e
 
     # 初始化 Session 工厂
     AsyncSessionLocal = sessionmaker(
@@ -99,24 +86,15 @@ async def create_engine_with_ssl_fallback():
 
 
 def create_session_local():
-    """
-    确保 AsyncSessionLocal 已初始化。
-    """
     global AsyncSessionLocal
     if AsyncSessionLocal is None:
-        raise RuntimeError(
-            "Database engine not initialized. Call create_engine_with_ssl_fallback first."
-        )
+        raise RuntimeError("Database engine not initialized.")
     return AsyncSessionLocal
 
 
 async def get_db():
-    """
-    FastAPI 依赖注入使用的数据库 Session 生成器。
-    """
     if AsyncSessionLocal is None:
         await create_engine_with_ssl_fallback()
-
     async with AsyncSessionLocal() as session:
         try:
             yield session
