@@ -30,3 +30,12 @@ class AppSetting(Base):
     key = Column(String(255), primary_key=True, nullable=False)
     value = Column(String(255), nullable=False)
     description = Column(String(255), nullable=True)
+
+
+class Tool(Base):
+    __tablename__ = "tools"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), unique=True, index=True, nullable=False)
+    display_name = Column(String(255), nullable=False)
+    is_enabled = Column(Boolean, default=True, nullable=False)
+    is_guest_allowed = Column(Boolean, default=True, nullable=False)
