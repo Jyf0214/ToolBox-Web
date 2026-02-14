@@ -1,6 +1,4 @@
 import os
-import shutil
-import subprocess
 import uuid
 from app.modules.base import BaseModule
 from nicegui import ui, app
@@ -35,9 +33,7 @@ class DocxToPdfModule(BaseModule):
 
     def setup_ui(self):
         ui.label("Word 转 PDF 转换器").classes("text-h4 mb-4")
-        ui.markdown(
-            "上传 `.docx` 文件，使用 LibreOffice 将其转换为高质量的 PDF 文件。"
-        ).classes("mb-4")
+        ui.markdown("上传 `.docx` 文件，将其转换为高质量的 PDF 文件。").classes("mb-4")
 
         with ui.card().classes("w-full max-w-xl p-6"):
             file_info = {"name": "", "content": None}
@@ -66,51 +62,37 @@ class DocxToPdfModule(BaseModule):
                 processing_dialog.open()
 
                 try:
+                    import aspose.words as aw
+
                     # 保存临时 docx
                     file_id = str(uuid.uuid4())
                     input_path = os.path.join(self.temp_dir, f"{file_id}.docx")
+                    output_path = os.path.join(self.temp_dir, f"{file_id}.pdf")
 
                     # 将上传的内容写入临时文件
                     content = file_info["content"].read()
                     with open(input_path, "wb") as f:
                         f.write(content)
 
-                    # 调用 LibreOffice 进行转换
-                    # --headless: 无界面模式
-                    # --convert-to pdf: 目标格式
-                    # --outdir: 输出目录
-                    libreoffice_path = (
-                        shutil.which("libreoffice") or "/usr/bin/libreoffice"
-                    )
                     # 验证输入文件路径安全（防止目录遍历）
                     abs_input_path = os.path.abspath(input_path)
                     abs_temp_dir = os.path.abspath(self.temp_dir)
                     if not abs_input_path.startswith(abs_temp_dir):
                         raise ValueError("Invalid input path")
-                    result = subprocess.run(
-                        [
-                            libreoffice_path,
-                            "--headless",
-                            "--convert-to",
-                            "pdf",
-                            abs_input_path,
-                            "--outdir",
-                            self.temp_dir,
-                        ],
-                        capture_output=True,
-                        text=True,
-                        shell=False,
-                    )
 
-                    if result.returncode == 0:
-                        ui.notify("转换成功！", color="positive")
-                        download_url = f"{self.router.prefix}/download/{file_id}"
-                        with result_container:
-                            ui.link("下载 PDF", download_url).classes(
-                                "text-lg text-primary underline"
-                            )
-                    else:
-                        ui.notify(f"转换失败: {result.stderr}", color="negative")
+                    # 使用 Aspose.Words 进行转换
+                    doc = aw.Document(abs_input_path)
+                    doc.save(output_path)
+
+                    ui.notify("转换成功！", color="positive")
+                    download_url = f"{self.router.prefix}/download/{file_id}"
+                    with result_container:
+                        ui.link("下载 PDF", download_url).classes(
+                            "text-lg text-primary underline"
+                        )
+
+                except ImportError:
+                    ui.notify("转换库未安装，请联系管理员", color="negative")
                 except Exception as ex:
                     ui.notify(f"出错: {ex}", color="negative")
                 finally:

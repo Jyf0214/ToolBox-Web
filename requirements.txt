@@ -11,3 +11,6 @@ pydantic-settings
 ruff
 bandit
 pre-commit
+GitPython
+pypandoc
+aspose-words

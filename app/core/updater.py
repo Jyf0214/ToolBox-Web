@@ -1,40 +1,73 @@
-import subprocess
 import os
 from typing import Optional, Tuple
+
+from git import Repo, GitCommandError
+
+
+def get_repo(cwd: Optional[str] = None) -> Optional[Repo]:
+    """获取 git 仓库对象"""
+    try:
+        return Repo(cwd or os.getcwd())
+    except Exception:
+        return None
 
 
 def run_git_command(command: list[str], cwd: Optional[str] = None) -> Tuple[bool, str]:
     """运行 git 命令并返回结果"""
+    repo = get_repo(cwd)
+    if not repo:
+        return False, "无法获取 git 仓库"
+
     try:
-        result = subprocess.run(
-            command, cwd=cwd or os.getcwd(), capture_output=True, text=True, timeout=30
-        )
-        if result.returncode == 0:
-            return True, result.stdout.strip()
-        else:
-            return False, result.stderr.strip()
-    except subprocess.TimeoutExpired:
-        return False, "命令执行超时"
+        # 使用 GitPython 的 git 命令执行
+        git = repo.git
+        cmd_name = command[0] if command else "git"
+        if cmd_name != "git":
+            return False, f"Unknown command: {cmd_name}"
+
+        # 构建 GitPython 命令
+        git_args = command[1:]
+        if not git_args:
+            return True, ""
+
+        # 执行命令
+        result = git.execute(["git"] + git_args)
+        return True, result
+    except GitCommandError as e:
+        return False, str(e)
     except Exception as e:
         return False, str(e)
 
 
 def get_current_commit() -> Tuple[bool, str]:
     """获取当前本地 commit hash"""
-    return run_git_command(["git", "rev-parse", "HEAD"])
+    repo = get_repo()
+    if repo:
+        try:
+            return True, repo.head.commit.hexsha
+        except Exception as e:
+            return False, str(e)
+    return False, "无法获取 git 仓库"
 
 
 def get_remote_commit() -> Tuple[bool, str]:
     """获取远程最新 commit hash"""
-    # 使用 HTTP 链接获取远程分支信息
-    success, output = run_git_command(
-        ["git", "fetch", "https://github.com/Jyf0214/ToolBox-Web.git", "main"]
-    )
-    if not success:
-        return False, f"获取远程信息失败: {output}"
+    remote_url = "https://github.com/Jyf0214/ToolBox-Web.git"
 
-    # 获取远程 HEAD 的 commit hash
-    return run_git_command(["git", "rev-parse", "FETCH_HEAD"])
+    repo = get_repo()
+    if not repo:
+        return False, "无法获取 git 仓库"
+
+    try:
+        # 获取远程信息
+        repo.git.fetch(remote_url, "main")
+        # 获取 FETCH_HEAD 的 commit
+        fetch_head = repo.git.rev_parse("FETCH_HEAD")
+        return True, fetch_head
+    except GitCommandError as e:
+        return False, f"获取远程信息失败: {e}"
+    except Exception as e:
+        return False, str(e)
 
 
 def check_for_updates() -> Tuple[bool, str, str, str]:
@@ -61,20 +94,28 @@ def check_for_updates() -> Tuple[bool, str, str, str]:
 
 def pull_updates() -> Tuple[bool, str]:
     """拉取并应用更新"""
-    # 使用 HTTP 链接拉取更新
-    success, output = run_git_command(
-        ["git", "pull", "https://github.com/Jyf0214/ToolBox-Web.git", "main"]
-    )
-    if success:
+    remote_url = "https://github.com/Jyf0214/ToolBox-Web.git"
+
+    repo = get_repo()
+    if not repo:
+        return False, "无法获取 git 仓库"
+
+    try:
+        # 使用 GitPython 拉取更新
+        repo.git.pull(remote_url, "main")
         return True, "更新成功"
-    else:
-        return False, f"更新失败: {output}"
+    except GitCommandError as e:
+        return False, f"更新失败: {e}"
+    except Exception as e:
+        return False, f"更新失败: {e}"
 
 
 def get_latest_commit_message() -> Tuple[bool, str]:
     """获取最新提交的日志信息"""
-    success, output = run_git_command(["git", "log", "-1", "--pretty=format:%s"])
-    if success:
-        return True, output
-    else:
-        return False, f"获取日志失败: {output}"
+    repo = get_repo()
+    if repo:
+        try:
+            return True, repo.head.commit.message.strip()
+        except Exception as e:
+            return False, str(e)
+    return False, "无法获取 git 仓库"
