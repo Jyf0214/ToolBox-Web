@@ -13,12 +13,6 @@ from app.core.updater import check_for_updates, pull_updates
 def create_admin_page(state, load_modules_func, sync_modules_func):
     @ui.page("/admin")
     async def admin_page():
-        try:
-            await asyncio.wait_for(state.initialized.wait(), timeout=10)
-        except asyncio.TimeoutError:
-            ui.notify("数据库连接超时。", color="negative")
-            return
-
         if state.needs_setup:
             ui.navigate.to("/setup")
             return

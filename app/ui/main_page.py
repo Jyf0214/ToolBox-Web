@@ -1,4 +1,3 @@
-import asyncio
 from fastapi import Request
 from nicegui import ui
 from sqlalchemy import select
@@ -13,12 +12,6 @@ from app.core.auth import is_authenticated
 def create_main_page(state, modules):
     @ui.page("/")
     async def main_page(request: Request):
-        try:
-            await asyncio.wait_for(state.initialized.wait(), timeout=10)
-        except asyncio.TimeoutError:
-            ui.notify("数据库连接超时。", color="negative")
-            return
-
         if state.needs_setup:
             ui.navigate.to("/setup")
             return
