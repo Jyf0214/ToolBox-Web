@@ -6,11 +6,10 @@ from sqlalchemy import select
 from nicegui import app
 
 from app.core import database
-from app.models.models import Tool, User
+from app.models.models import User
 from app.core.database import (
     Base,
     create_engine_with_ssl_fallback,
-    create_session_local,
 )
 from app.core.config import settings
 from app.modules.base import BaseModule
@@ -41,41 +40,28 @@ def load_modules(modules_list, module_instances_dict):
 
 
 async def sync_modules_with_db(state, modules_list):
+    """
+    [功能已删除] 原有的模块同步到数据库逻辑已移除。
+    待重建：基于新数据库架构的模块注册机制。
+    """
     if not state.db_connected:
         return
-
-    async with database.AsyncSessionLocal() as session:
-        result = await session.execute(select(Tool))
-        db_tools = {t.name: t for t in result.scalars().all()}
-
-        for m in modules_list:
-            if m.id not in db_tools:
-                new_tool = Tool(
-                    name=m.id,
-                    display_name=m.name,
-                    is_enabled=m.default_enabled,
-                    is_guest_allowed=True,
-                )
-                session.add(new_tool)
-            elif db_tools[m.id].display_name != m.name:
-                db_tools[m.id].display_name = m.name
-
-        await session.commit()
+    # 逻辑已删除
+    pass
 
 
 async def startup_handler(state, modules_list, module_instances_dict):
     try:
-        print("正在初始化数据库引擎...")
-        await asyncio.wait_for(create_engine_with_ssl_fallback(), timeout=20)
-        create_session_local()
+        print("正在初始化数据库引擎 (强制 SSL)...")
+        # 增加超时处理
+        await asyncio.wait_for(create_engine_with_ssl_fallback(), timeout=30)
         state.db_connected = True
 
         async with database.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         print("数据库初始化成功。")
-
     except Exception as e:
-        print(f"数据库连接失败: {e}")
+        print(f"数据库连接失败 (已拒绝不安全连接): {e}")
         state.db_connected = False
 
     if state.db_connected:
@@ -94,7 +80,7 @@ async def startup_handler(state, modules_list, module_instances_dict):
         state.needs_setup = False
 
     load_modules(modules_list, module_instances_dict)
-    await sync_modules_with_db(state, modules_list)
+    # await sync_modules_with_db(state, modules_list) # 已禁用
 
     for m in modules_list:
         m.setup_api()
