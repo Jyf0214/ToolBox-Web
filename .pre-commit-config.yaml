@@ -7,6 +7,16 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
 
+  - repo: local
+    hooks:
+      - id: check-apt-in-app-dockerfile
+        name: Check for apt usage in App Dockerfile
+        entry: grep -Ei "apt-get|apt install" Dockerfile
+        language: system
+        files: ^Dockerfile$
+        pass_filenames: false
+        message: "Error: Do not use 'apt' in the main Dockerfile. Please update Dockerfile.base instead to include new system dependencies."
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.1.9
     hooks:
