@@ -18,7 +18,7 @@ AsyncSessionLocal = None
 
 
 async def create_engine_with_ssl_fallback():
-    global engine, AsyncSessionLocal
+    global engine
 
     db_url = settings.DATABASE_URL
 
@@ -95,6 +95,7 @@ def create_session_local():
     AsyncSessionLocal = sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
+    logger.info("AsyncSessionLocal initialized successfully.")
 
 
 # 获取数据库 session

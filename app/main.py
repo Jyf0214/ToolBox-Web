@@ -12,10 +12,10 @@ import bcrypt
 from sqlalchemy import select, update
 from app.core.database import (
     Base,
-    AsyncSessionLocal,
     create_engine_with_ssl_fallback,
     create_session_local,
 )
+from app.core import database
 from app.models.models import Guest, User, Tool
 from app.core.config import settings
 from app.modules.base import BaseModule
@@ -96,7 +96,7 @@ async def sync_modules_with_db():
     if not state.db_connected:
         return
 
-    async with AsyncSessionLocal() as session:
+    async with database.AsyncSessionLocal() as session:
         # 获取数据库中的所有模块
         result = await session.execute(select(Tool))
         db_tools = {t.name: t for t in result.scalars().all()}
@@ -133,7 +133,7 @@ async def startup():
         state.db_connected = True  # 数据库连接成功
 
         # 尝试创建所有表
-        async with AsyncSessionLocal() as session:
+        async with database.AsyncSessionLocal() as session:
             await session.run_sync(Base.metadata.create_all)
         print("数据库表创建/检查成功。")
 
@@ -151,7 +151,7 @@ async def startup():
 
         # 只有在数据库连接成功时才检查管理员是否存在，否则强制进入访客模式
         if state.db_connected:
-            async with AsyncSessionLocal() as session:
+            async with database.AsyncSessionLocal() as session:
                 result = await session.execute(select(User).where(User.is_admin))
                 admin_exists = result.scalars().first() is not None
             state.needs_setup = admin_exists is None
@@ -188,7 +188,7 @@ async def get_or_create_guest(fingerprint: str, ip: str):
     if not state.db_connected:  # 数据库未连接，访客追踪不可用
         return
 
-    async with AsyncSessionLocal() as session:
+    async with database.AsyncSessionLocal() as session:
         result = await session.execute(
             select(Guest).where(Guest.fingerprint == fingerprint)
         )
@@ -243,7 +243,7 @@ async def setup_page():
                 )
                 return
 
-            async with AsyncSessionLocal() as session:
+            async with database.AsyncSessionLocal() as session:
                 user = User(
                     username=admin_username.value,
                     hashed_password=get_password_hash(admin_password.value),
@@ -313,7 +313,7 @@ async def main_page(request: Request):
         # 获取模块在数据库中的状态
         enabled_modules = []
         if state.db_connected:
-            async with AsyncSessionLocal() as session:
+            async with database.AsyncSessionLocal() as session:
                 result = await session.execute(select(Tool))
                 db_tools = {t.name: t for t in result.scalars().all()}
 
@@ -366,7 +366,7 @@ async def admin_page():
             pwd.disable() if not state.db_connected else None
 
             async def login():
-                async with AsyncSessionLocal() as session:
+                async with database.AsyncSessionLocal() as session:
                     admin = await session.execute(select(User).where(User.is_admin))
                     admin = admin.scalars().first()
                     if admin and verify_password(pwd.value, admin.hashed_password):
@@ -448,7 +448,7 @@ async def admin_page():
         else:
 
             async def toggle_tool(tool_name, field, value):
-                async with AsyncSessionLocal() as session:
+                async with database.AsyncSessionLocal() as session:
                     await session.execute(
                         update(Tool)
                         .where(Tool.name == tool_name)
@@ -457,7 +457,7 @@ async def admin_page():
                     await session.commit()
                 ui.notify(f"已更新 {tool_name}")
 
-            async with AsyncSessionLocal() as session:
+            async with database.AsyncSessionLocal() as session:
                 result = await session.execute(select(Tool).order_by(Tool.id))
                 tools = result.scalars().all()
 
@@ -585,7 +585,7 @@ async def admin_page():
         if not state.db_connected:  # 数据库未连接，访客列表不可用
             ui.label("最近访客列表不可用（数据库未连接）。").classes("text-negative")
         else:
-            async with AsyncSessionLocal() as session:
+            async with database.AsyncSessionLocal() as session:
                 guests = await session.execute(
                     select(Guest).order_by(Guest.last_seen.desc()).limit(10)
                 )
