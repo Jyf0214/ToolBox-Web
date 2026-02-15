@@ -103,16 +103,25 @@ async def startup_handler(state, modules_list, module_instances_dict):
             app.storage.secret = settings._SECRET_KEY
 
             async with database.AsyncSessionLocal() as session:
-                result = await session.execute(select(User).where(User.is_admin))
-                admin_exists = result.scalars().first() is not None
-            state.needs_setup = not admin_exists
-        except Exception as e:
-            print(f"初始化管理员检查失败: {e}")
-            state.needs_setup = (
-                True  # 检查失败时保守起见设为 True，允许进入 setup 尝试修复
+                from sqlalchemy import func
+
+                # 使用 count 聚合查询更高效
+                result = await session.execute(
+                    select(func.count(User.id)).where(User.is_admin)
+                )
+                admin_count = result.scalar()
+
+            state.needs_setup = admin_count == 0
+            print(
+                f"管理员账号检查完成: 已存在 {admin_count} 个管理员。Needs Setup: {state.needs_setup}"
             )
+        except Exception as e:
+            print(f"初始化管理员检查过程中出错: {e}")
+            # 如果是表不存在等错误，通常发生在初始化中，设为 True
+            state.needs_setup = True
     else:
-        state.needs_setup = True  # 数据库未连上时也设为 True，setup 页面会处理连接等待
+        # 数据库未连上时，保持 True 允许用户去 /setup 页面等待或修复
+        state.needs_setup = True
 
     load_modules(modules_list, module_instances_dict)
     # await sync_modules_with_db(state, modules_list) # 已禁用

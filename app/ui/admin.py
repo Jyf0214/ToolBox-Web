@@ -1,6 +1,9 @@
 from nicegui import ui, app
 from fastapi import Request
+from sqlalchemy import select, func
 
+from app.core import database
+from app.models.models import User
 from app.core.auth import is_authenticated
 from app.ui.admin_parts.auth import render_login
 from app.ui.admin_parts.dashboard import render_dashboard, render_settings, render_smtp
@@ -19,6 +22,18 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
     async def admin_page(request: Request):
         client_ip = request.client.host
         request_host = request.headers.get("host", "")
+
+        # --- 紧急强制校验: 确保不会在有管理员的情况下进入 setup ---
+        if state.db_connected:
+            try:
+                async with database.AsyncSessionLocal() as session:
+                    res = await session.execute(
+                        select(func.count(User.id)).where(User.is_admin)
+                    )
+                    if res.scalar() > 0:
+                        state.needs_setup = False
+            except Exception:
+                pass
 
         if state.needs_setup:
             ui.navigate.to("/setup")
@@ -49,13 +64,12 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
 
         # 如果未登录，直接渲染登录组件并返回
         if not is_authenticated():
-            # 登录成功后跳转回 /admin 触发页面刷新以加载管理布局
             await render_login(client_ip, state, lambda: ui.navigate.to("/admin"))
             return
 
-        # --- 以下是已登录后的管理后台布局 (必须作为页面直接子元素) ---
+        # --- 页面内容骨架 (立即响应) ---
+        # 使用 Header 和 Drawer 占位，内容通过异步加载
 
-        # --- 侧边栏布局 ---
         with ui.header().classes("bg-slate-900 items-center justify-between px-4 py-2"):
             with ui.row().classes("items-center"):
                 ui.button(on_click=lambda: left_drawer.toggle(), icon="menu").props(
@@ -65,7 +79,7 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
 
             def logout():
                 app.storage.user.update({"authenticated": False})
-                ui.navigate.to("/admin")  # 刷新以切换到登录布局
+                ui.navigate.to("/admin")
 
             ui.button("退出", icon="logout", on_click=logout).props(
                 "flat color=white size=sm"
@@ -165,34 +179,42 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                 else:
                     btn.classes(remove="bg-primary text-white", add="text-slate-600")
 
-        # --- 内容区域 ---
+        # --- 内容容器 ---
+        # 页面初始只创建容器，不运行耗时的 render 函数
         main_container = ui.column().classes("p-4 sm:p-8 w-full max-w-5xl mx-auto")
         with main_container:
-            with ui.column().classes("w-full") as sections["dashboard"]:
-                await render_dashboard(state)
+            sections["dashboard"] = ui.column().classes("w-full")
+            sections["settings"] = ui.column().classes("w-full hidden")
+            sections["tools"] = ui.column().classes("w-full hidden")
+            sections["update"] = ui.column().classes("w-full hidden")
+            sections["maintenance"] = ui.column().classes("w-full hidden")
+            sections["queue"] = ui.column().classes("w-full hidden")
+            sections["status"] = ui.column().classes("w-full hidden")
+            sections["logs"] = ui.column().classes("w-full hidden")
 
-            with ui.column().classes("w-full hidden") as sections["settings"]:
+        # --- 异步加载数据 (解决 3s 超时) ---
+        async def load_all_sections():
+            with sections["dashboard"]:
+                await render_dashboard(state)
+            with sections["settings"]:
                 await render_settings(state)
                 ui.separator().classes("my-8")
                 await render_smtp()
-
-            with ui.column().classes("w-full hidden") as sections["tools"]:
+            with sections["tools"]:
                 await render_tools(state, load_modules_func, sync_modules_func)
-
-            with ui.column().classes("w-full hidden") as sections["update"]:
+            with sections["update"]:
                 await render_update()
-
-            with ui.column().classes("w-full hidden") as sections["maintenance"]:
+            with sections["maintenance"]:
                 await render_maintenance(state)
-
-            with ui.column().classes("w-full hidden") as sections["queue"]:
+            with sections["queue"]:
                 render_queue()
-
-            with ui.column().classes("w-full hidden") as sections["status"]:
+            with sections["status"]:
                 await render_system_status(state)
-
-            with ui.column().classes("w-full hidden") as sections["logs"]:
+            with sections["logs"]:
                 await render_logs(state)
 
-        # 初始激活 dashboard 样式
-        switch_to("dashboard")
+            # 加载完成后激活默认菜单样式
+            switch_to("dashboard")
+
+        # 启动后台加载任务，不阻塞页面返回
+        ui.timer(0.1, load_all_sections, once=True)
