@@ -38,6 +38,13 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: apt-single-run-check
+        name: Ensure apt commands are in a single RUN
+        entry: python3 scripts/check_docker_apt_single_run.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.6
     hooks:
