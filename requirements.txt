@@ -1,4 +1,4 @@
-nicegui==2.12.1
+nicegui==3.7.0
 sqlalchemy==2.0.45
 aiomysql==0.2.0
 cryptography==46.0.5
