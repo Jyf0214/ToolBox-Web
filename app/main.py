@@ -41,6 +41,49 @@ async def on_startup():
     await startup_handler(state, modules, module_instances)
 
 
+# 全局异常处理逻辑
+def handle_exception(e: Exception):
+    from app.core.auth import is_authenticated
+    from app.core.updater import generate_emergency_token, pull_updates
+
+    # 记录错误
+    print(f"CRITICAL ERROR: {e}")
+
+    if is_authenticated():
+        token = generate_emergency_token()
+
+        async def emergency_repair():
+            ui.notify("正在尝试紧急修复更新...", type="warning")
+            success, msg = await asyncio.get_event_loop().run_in_executor(
+                None, pull_updates
+            )
+            if success:
+                ui.notify("修复成功，请手动重启应用", color="positive", duration=0)
+            else:
+                ui.notify(f"修复失败: {msg}", color="negative")
+
+        with ui.dialog() as dialog, ui.card().classes("p-6 border-2 border-negative"):
+            ui.label("系统发生严重错误").classes("text-h6 text-negative mb-2")
+            ui.label(f"错误详情: {str(e)[:200]}...").classes(
+                "text-xs text-slate-500 mb-4"
+            )
+            ui.label(f"安全令牌: {token}").classes(
+                "text-[10px] font-mono bg-slate-100 p-1 mb-4"
+            )
+
+            with ui.row().classes("w-full justify-end gap-2"):
+                ui.button("忽略", on_click=dialog.close).props("flat")
+                ui.button(
+                    "执行紧急更新修复",
+                    on_click=lambda: (dialog.close(), emergency_repair()),
+                ).props("elevated color=negative")
+        dialog.open()
+    else:
+        ui.notify("系统运行出错，请联系管理员", color="negative")
+
+
+app.on_exception(handle_exception)
+
 # 注册 API 路由
 app.include_router(setup_tracking_api(state))
 

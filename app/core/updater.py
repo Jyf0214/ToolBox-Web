@@ -1,5 +1,7 @@
 import os
 import subprocess
+import time
+import secrets
 from typing import Optional, Tuple, List
 
 
@@ -133,6 +135,28 @@ def check_critical_changes() -> List[str]:
                 changed_critical.append(f)
 
     return changed_critical
+
+
+# 存储一次性紧急更新令牌
+# 格式: {token: expires_at}
+emergency_tokens = {}
+
+
+def generate_emergency_token() -> str:
+    """生成一个一次性的紧急更新令牌"""
+    token = f"token_v1_{secrets.token_urlsafe(16)}"
+    # 令牌有效期 10 分钟
+    emergency_tokens[token] = time.time() + 600
+    return token
+
+
+def verify_emergency_token(token: str) -> bool:
+    """验证并消耗令牌"""
+    if token in emergency_tokens:
+        expiry = emergency_tokens.pop(token)
+        if time.time() < expiry:
+            return True
+    return False
 
 
 def get_remote_changelog() -> Tuple[bool, str]:
