@@ -37,12 +37,26 @@ def create_setup_page(state):
                     return
 
                 async with database.AsyncSessionLocal() as session:
-                    user = User(
-                        username=admin_username.value,
-                        hashed_password=get_password_hash(admin_password.value),
-                        is_admin=True,
-                    )
-                    session.add(user)
+                    from sqlalchemy import select
+                    # 检查用户是否已存在
+                    stmt = select(User).where(User.username == admin_username.value)
+                    result = await session.execute(stmt)
+                    existing_user = result.scalars().first()
+
+                    if existing_user:
+                        # 如果已存在，则更新密码
+                        existing_user.hashed_password = get_password_hash(admin_password.value)
+                        existing_user.is_admin = True
+                        ui.notify(f"用户 {admin_username.value} 已存在，已更新其管理员密码。", color="info")
+                    else:
+                        # 不存在则创建
+                        user = User(
+                            username=admin_username.value,
+                            hashed_password=get_password_hash(admin_password.value),
+                            is_admin=True,
+                        )
+                        session.add(user)
+                    
                     await session.commit()
 
                 await set_setting("site_name", site_name_input.value)

@@ -72,12 +72,12 @@ async def startup_handler(state, modules_list, module_instances_dict):
             async with database.AsyncSessionLocal() as session:
                 result = await session.execute(select(User).where(User.is_admin))
                 admin_exists = result.scalars().first() is not None
-            state.needs_setup = admin_exists is None
+            state.needs_setup = not admin_exists
         except Exception as e:
             print(f"初始化管理员检查失败: {e}")
-            state.needs_setup = False
+            state.needs_setup = True  # 检查失败时保守起见设为 True，允许进入 setup 尝试修复
     else:
-        state.needs_setup = False
+        state.needs_setup = True # 数据库未连上时也设为 True，setup 页面会处理连接等待
 
     load_modules(modules_list, module_instances_dict)
     # await sync_modules_with_db(state, modules_list) # 已禁用
