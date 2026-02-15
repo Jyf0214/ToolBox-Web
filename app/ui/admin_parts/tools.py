@@ -53,6 +53,9 @@ async def render_tools(state, load_modules_func, sync_modules_func):
             ui.label(f"配置 {t_obj.display_name}").classes("text-lg mb-4")
             cnt = ui.number("限制次数", value=t_obj.rate_limit_count).classes("w-full")
             per = ui.number("秒数", value=t_obj.rate_limit_period).classes("w-full")
+            cap = ui.switch(
+                "开启人机验证 (Cloudflare)", value=t_obj.requires_captcha
+            ).classes("mt-2")
 
             async def sv():
                 async with database.AsyncSessionLocal() as s:
@@ -63,6 +66,7 @@ async def render_tools(state, load_modules_func, sync_modules_func):
                             {
                                 "rate_limit_count": int(cnt.value),
                                 "rate_limit_period": int(per.value),
+                                "requires_captcha": cap.value,
                             }
                         )
                     )

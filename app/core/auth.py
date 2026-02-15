@@ -1,5 +1,24 @@
 import bcrypt
+import httpx
 from nicegui import app
+
+
+async def verify_turnstile(token: str, secret_key: str) -> bool:
+    """后端验证 Cloudflare Turnstile Token"""
+    if not token:
+        return False
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                data={"secret": secret_key, "response": token},
+                timeout=10.0,
+            )
+            data = res.json()
+            return data.get("success", False)
+    except Exception as e:
+        print(f"[Security] Turnstile verification error: {e}")
+        return False
 
 
 def get_password_hash(password: str) -> str:

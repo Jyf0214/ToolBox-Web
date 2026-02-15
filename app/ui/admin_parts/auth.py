@@ -1,12 +1,11 @@
 import time
 import secrets
 import string
-import httpx
 from nicegui import ui, app
 from sqlalchemy import select
 from app.core import database
 from app.models.models import User
-from app.core.auth import verify_password
+from app.core.auth import verify_password, verify_turnstile
 from app.core.settings_manager import get_setting
 
 # 登录限流配置
@@ -14,24 +13,6 @@ login_attempts = {}
 MAX_ATTEMPTS = 5
 LOCKOUT_TIME = 300
 reset_data = {}
-
-
-async def verify_turnstile(token: str, secret_key: str) -> bool:
-    """后端验证 Cloudflare Turnstile Token"""
-    if not token:
-        return False
-    try:
-        async with httpx.AsyncClient() as client:
-            res = await client.post(
-                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-                data={"secret": secret_key, "response": token},
-                timeout=10.0,
-            )
-            data = res.json()
-            return data.get("success", False)
-    except Exception as e:
-        print(f"[Security] Turnstile verification error: {e}")
-        return False
 
 
 async def render_login(client_ip, state, on_success):

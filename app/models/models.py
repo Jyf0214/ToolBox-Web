@@ -39,6 +39,7 @@ class Tool(Base):
     display_name = Column(String(255), nullable=False)
     is_enabled = Column(Boolean, default=True, nullable=False)
     is_guest_allowed = Column(Boolean, default=True, nullable=False)
+    requires_captcha = Column(Boolean, default=False, nullable=False)  # 是否需要验证码
     rate_limit_count = Column(Integer, default=0, nullable=False)  # 0 表示不限制
     rate_limit_period = Column(Integer, default=60, nullable=False)  # 默认 60 秒
 

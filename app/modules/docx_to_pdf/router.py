@@ -84,6 +84,43 @@ class DocxToPdfModule(BaseModule):
             "上传 `.docx` 文件，将其转换为高质量的 PDF，支持页数统计与在线预览。"
         ).classes("mb-4 text-slate-500")
 
+        # 1. 动态加载工具安全配置
+        async def get_tool_security():
+            from app.core import database
+            from app.models.models import Tool
+            from sqlalchemy import select
+
+            async with database.AsyncSessionLocal() as session:
+                res = await session.execute(
+                    select(Tool).where(Tool.name == "Word 转 PDF")
+                )
+                return res.scalars().first()
+
+        # 状态容器
+        security_state = {"site_key": "", "secret_key": "", "requires_captcha": False}
+
+        async def init_security():
+            from app.core.settings_manager import get_setting
+
+            tool = await get_tool_security()
+            if tool and tool.requires_captcha:
+                security_state["requires_captcha"] = True
+                security_state["site_key"] = await get_setting(
+                    "cf_turnstile_site_key", ""
+                )
+                security_state["secret_key"] = await get_setting(
+                    "cf_turnstile_secret_key", ""
+                )
+                if security_state["site_key"]:
+                    ui.add_head_html(
+                        '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>'
+                    )
+                    captcha_container.set_visibility(True)
+                    with captcha_container:
+                        ui.html(
+                            f'<div class="cf-turnstile" data-sitekey="{security_state["site_key"]}"></div>'
+                        )
+
         # 错误日志对话框
         with ui.dialog() as error_dialog, ui.card().classes("w-full max-w-2xl"):
             ui.label("详细错误日志").classes("text-h6")
@@ -123,6 +160,10 @@ class DocxToPdfModule(BaseModule):
             )
             status_label = ui.label("等待上传...").classes(
                 "text-sm text-slate-500 mb-2 hidden"
+            )
+
+            captcha_container = ui.element("div").classes(
+                "w-full flex justify-center mb-4 hidden"
             )
 
             add_blank_page = ui.checkbox(
@@ -175,7 +216,29 @@ class DocxToPdfModule(BaseModule):
                     return
 
                 from app.core.task_manager import global_task_manager
-                from app.core.auth import is_authenticated
+                from app.core.auth import is_authenticated, verify_turnstile
+
+                # 3. 验证 CAPTCHA (如果启用)
+                if (
+                    security_state["requires_captcha"]
+                    and security_state["site_key"]
+                    and security_state["secret_key"]
+                ):
+                    token = await ui.run_javascript(
+                        'try { return turnstile.getResponse(); } catch(e) { return ""; }'
+                    )
+                    if not token:
+                        ui.notify("请先完成人机验证", color="warning")
+                        return
+                    is_human = await verify_turnstile(
+                        token, security_state["secret_key"]
+                    )
+                    if not is_human:
+                        ui.notify("验证码失效，请重试", color="negative")
+                        await ui.run_javascript(
+                            "try { turnstile.reset(); } catch(e) {}"
+                        )
+                        return
 
                 client_ip = app.storage.browser.get("id", "Anonymous")
 
@@ -260,46 +323,6 @@ class DocxToPdfModule(BaseModule):
                         status_label.set_text("转换完成！")
                         ui.notify("转换成功！", color="positive")
 
-                    file_id = str(uuid.uuid4())
-                    input_path = os.path.join(self.temp_dir, f"{file_id}.docx")
-                    output_path = os.path.join(self.temp_dir, f"{file_id}.pdf")
-
-                    with open(input_path, "wb") as f:
-                        f.write(state["content"])
-
-                    status_label.set_text("LibreOffice 正在渲染 PDF...")
-                    progress_bar.set_value(0.7)
-
-                    libreoffice_path = (
-                        shutil.which("libreoffice") or "/usr/bin/libreoffice"
-                    )
-
-                    # 运行转换
-                    process = await asyncio.create_subprocess_exec(
-                        libreoffice_path,
-                        "--headless",
-                        "--convert-to",
-                        "pdf",
-                        input_path,
-                        "--outdir",
-                        self.temp_dir,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    stdout, stderr = await process.communicate()
-
-                    if process.returncode == 0:
-                        status_label.set_text("处理 PDF 页面...")
-                        progress_bar.set_value(0.9)
-
-                        if add_blank_page.value:
-                            self._add_blank_page_if_needed(output_path, True)
-
-                        info = self._get_pdf_info(output_path)
-                        progress_bar.set_value(1.0)
-                        status_label.set_text("转换成功！")
-                        ui.notify("转换成功！", color="positive")
-
                         download_url = f"{self.router.prefix}/download/{file_id}"
 
                         # 展示美化后的结果
@@ -353,3 +376,5 @@ class DocxToPdfModule(BaseModule):
                 "w-full mt-2 py-4 text-lg"
             )
             convert_btn.disable()
+
+        ui.timer(0.1, init_security, once=True)
