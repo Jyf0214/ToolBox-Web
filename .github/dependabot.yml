@@ -1,0 +1,20 @@
+# Dependabot 配置文件
+# 文档: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # 配置 Python (pip) 依赖检查
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "daily" # 每天检查一次版本更新
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "python"
+
+  # 配置 GitHub Actions 检查
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
