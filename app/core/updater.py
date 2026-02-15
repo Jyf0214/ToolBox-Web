@@ -109,6 +109,30 @@ def pull_updates() -> Tuple[bool, str]:
             return False, f"更新失败: {output_reset}"
 
 
+def get_remote_changelog() -> Tuple[bool, str]:
+    """从远程获取 CHANGELOG.md 内容"""
+    if not GIT_AVAILABLE:
+        return False, "Git 命令不可用"
+    
+    # 使用 git archive 或 temporary clone 比较麻烦，最快的是直接通过 raw 内容获取 (如果是 GitHub)
+    # 或者使用 git show 远程分支的文件
+    # 首先确保远程信息是最新的
+    run_git_command(["git", "fetch", REPO_URL, "main"])
+    return run_git_command(["git", "show", "FETCH_HEAD:CHANGELOG.md"])
+
+
+def get_local_changelog() -> Tuple[bool, str]:
+    """获取本地 CHANGELOG.md 内容"""
+    try:
+        changelog_path = os.path.join(os.getcwd(), "CHANGELOG.md")
+        if os.path.exists(changelog_path):
+            with open(changelog_path, "r", encoding="utf-8") as f:
+                return True, f.read()
+        return False, "本地 CHANGELOG.md 不存在"
+    except Exception as e:
+        return False, str(e)
+
+
 def get_latest_commit_message() -> Tuple[bool, str]:
     """获取最新提交的日志信息"""
     if not GIT_AVAILABLE:

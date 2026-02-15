@@ -275,45 +275,181 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                                                 ui.switch("游客", value=t.is_guest_allowed, on_change=lambda e, name=t.name: toggle_tool(name, "is_guest_allowed", e.value)).props("dense")
                     await refresh_tool_list()
 
-                # --- 系统更新 ---
-                with ui.column().classes("w-full hidden") as sections["update"]:
-                    ui.label("系统更新").classes("text-2xl font-bold mb-6")
-                    with ui.card().classes("w-full p-8 shadow-sm border items-center text-center"):
-                        ui.icon("system_update_alt", color="primary").classes("text-6xl mb-4")
-                        status_label = ui.label("检查系统是否有可用更新").classes("text-lg mb-2")
-                        info_label = ui.label(f"当前版本: v{settings.VERSION}").classes("text-sm text-slate-500 mb-6")
-                        with ui.row().classes("gap-4"):
-                            check_btn = ui.button("检查更新", icon="search").props("elevated")
-                            pull_btn = ui.button("拉取更新", icon="cloud_download").props("outline").classes("hidden")
-                            async def check_update():
-                                check_btn.disable()
-                                status_label.set_text("正在连接服务器...")
-                                try:
-                                    has_up, local, remote, msg = await asyncio.get_event_loop().run_in_executor(None, check_for_updates)
-                                    status_label.set_text(msg)
-                                    if has_up:
-                                        info_label.set_text(f"发现新版本: {remote} (当前: {local})")
-                                        pull_btn.set_visibility(True)
-                                    else:
-                                        info_label.set_text(f"当前已是最新版本 (v{local})")
-                                except Exception as e_up:
-                                    status_label.set_text(f"检查失败: {e_up}")
-                                finally:
-                                    check_btn.enable()
-                            async def pull_update_action():
-                                pull_btn.disable()
-                                status_label.set_text("正在更新...")
-                                try:
-                                    success, msg = await asyncio.get_event_loop().run_in_executor(None, pull_updates)
-                                    status_label.set_text(msg)
-                                    if success:
-                                        ui.notify("更新成功，请手动重启应用以生效", color="positive", duration=10)
-                                except Exception as e_pull:
-                                    status_label.set_text(f"更新失败: {e_pull}")
-                                finally:
-                                    pull_btn.enable()
-                            check_btn.on_click(check_update)
-                            pull_btn.on_click(pull_update_action)
+                            # --- 系统更新 ---
+
+                            with ui.column().classes("w-full hidden") as sections["update"]:
+
+                                ui.label("系统更新").classes("text-2xl font-bold mb-6")
+
+                                with ui.card().classes("w-full p-8 shadow-sm border"):
+
+                                    with ui.column().classes("w-full items-center text-center"):
+
+                                        ui.icon("system_update_alt", color="primary").classes("text-6xl mb-4")
+
+                                        status_label = ui.label("检查系统是否有可用更新").classes("text-lg mb-2")
+
+                                        info_label = ui.label(f"当前版本: v{settings.VERSION}").classes("text-sm text-slate-500 mb-6")
+
+                                    
+
+                                    # 日志对比区域
+
+                                    changelog_container = ui.column().classes("w-full mt-4 hidden")
+
+                                    with changelog_container:
+
+                                        ui.separator().classes("mb-4")
+
+                                        ui.label("更新日志对比").classes("text-sm font-bold text-slate-700 mb-2")
+
+                                        with ui.row().classes("w-full gap-4"):
+
+                                            with ui.column().classes("flex-1"):
+
+                                                ui.label("本地 (当前)").classes("text-xs text-slate-400")
+
+                                                local_scroll = ui.scroll_area().classes("h-64 border rounded p-2 bg-slate-50 text-xs")
+
+                                            with ui.column().classes("flex-1"):
+
+                                                ui.label("远程 (最新)").classes("text-xs text-primary")
+
+                                                remote_scroll = ui.scroll_area().classes("h-64 border rounded p-2 bg-blue-50 text-xs")
+
+                
+
+                                    with ui.row().classes("w-full justify-center gap-4 mt-8"):
+
+                                        check_btn = ui.button("检查更新", icon="search").props("elevated")
+
+                                        pull_btn = ui.button("立即开始更新", icon="cloud_download").props("color=positive elevated").classes("hidden")
+
+                
+
+                                        async def check_update():
+
+                                            check_btn.disable()
+
+                                            status_label.set_text("正在同步远程仓库...")
+
+                                            try:
+
+                                                from app.core.updater import get_local_changelog, get_remote_changelog
+
+                                                has_up, local_v, remote_v, msg = await asyncio.get_event_loop().run_in_executor(None, check_for_updates)
+
+                                                
+
+                                                # 获取日志
+
+                                                _, local_log = get_local_changelog()
+
+                                                _, remote_log = await asyncio.get_event_loop().run_in_executor(None, get_remote_changelog)
+
+                                                
+
+                                                local_scroll.clear()
+
+                                                with local_scroll:
+
+                                                    ui.markdown(local_log or "无日志")
+
+                                                
+
+                                                remote_scroll.clear()
+
+                                                with remote_scroll:
+
+                                                    ui.markdown(remote_log or "无日志")
+
+                                                
+
+                                                changelog_container.set_visibility(True)
+
+                                                status_label.set_text(msg)
+
+                                                
+
+                                                if has_up:
+
+                                                    info_label.set_text(f"检测到新版本: v{remote_v} (当前: v{local_v})")
+
+                                                    pull_btn.set_visibility(True)
+
+                                                else:
+
+                                                    info_label.set_text(f"您已经是最新版本 (v{local_v})")
+
+                                                    pull_btn.set_visibility(False)
+
+                                                    
+
+                                            except Exception as e_up:
+
+                                                status_label.set_text(f"检查失败: {e_up}")
+
+                                            finally:
+
+                                                check_btn.enable()
+
+                
+
+                                        async def confirm_update():
+
+                                            with ui.dialog() as confirm_dialog, ui.card().classes("p-6"):
+
+                                                ui.label("确认更新系统？").classes("text-h6 mb-4")
+
+                                                ui.label("系统将拉取最新代码并可能需要手动重启。更新过程中请勿切断电源。").classes("text-slate-500 mb-6")
+
+                                                with ui.row().classes("w-full justify-end gap-2"):
+
+                                                    ui.button("取消", on_click=confirm_dialog.close).props("flat")
+
+                                                    ui.button("确认更新", on_click=lambda: (confirm_dialog.close(), do_pull_update())).props("elevated color=positive")
+
+                                            confirm_dialog.open()
+
+                
+
+                                        async def do_pull_update():
+
+                                            pull_btn.disable()
+
+                                            check_btn.disable()
+
+                                            status_label.set_text("正在下载并应用更新...")
+
+                                            try:
+
+                                                success, msg = await asyncio.get_event_loop().run_in_executor(None, pull_updates)
+
+                                                status_label.set_text(msg)
+
+                                                if success:
+
+                                                    ui.notify("系统更新成功！", color="positive", duration=None)
+
+                                                    ui.label("更新已完成。请通过控制台重启应用以加载新版本。").classes("text-positive font-bold mt-4")
+
+                                            except Exception as e_pull:
+
+                                                status_label.set_text(f"更新失败: {e_pull}")
+
+                                            finally:
+
+                                                pull_btn.enable()
+
+                                                check_btn.enable()
+
+                
+
+                                        check_btn.on_click(check_update)
+
+                                        pull_btn.on_click(confirm_update)
+
+                
 
                 # --- 访问日志 ---
                 with ui.column().classes("w-full hidden") as sections["logs"]:
