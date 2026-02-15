@@ -260,20 +260,55 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                                 ui.label("暂无工具，请点击右上角刷新").classes("text-slate-400 italic")
                                 return
                             with ui.grid(columns=(1, 'md:2', 'lg:2')).classes("w-full gap-4"):
-                                for t in tools:
-                                    with ui.card().classes("p-4 shadow-sm border hover:shadow-md transition-shadow"):
-                                        with ui.row().classes("w-full items-start justify-between"):
-                                            with ui.column().classes("flex-1"):
-                                                ui.label(t.display_name).classes("text-lg font-bold truncate")
-                                                ui.label(t.name).classes("text-xs text-slate-400 font-mono")
-                                            async def toggle_tool(tool_name, field, value):
-                                                async with database.AsyncSessionLocal() as session_int:
-                                                    await session_int.execute(update(Tool).where(Tool.name == tool_name).values({field: value}))
-                                                    await session_int.commit()
-                                                ui.notify(f"已更新 {tool_name}")
-                                            with ui.column().classes("items-end"):
-                                                ui.switch("启用", value=t.is_enabled, on_change=lambda e, name=t.name: toggle_tool(name, "is_enabled", e.value)).props("dense")
-                                                ui.switch("游客", value=t.is_guest_allowed, on_change=lambda e, name=t.name: toggle_tool(name, "is_guest_allowed", e.value)).props("dense")
+                                                            for t in tools:
+                                                                with ui.card().classes("p-4 shadow-sm border hover:shadow-md transition-shadow"):
+                                                                    with ui.row().classes("w-full items-start justify-between"):
+                                                                        with ui.column().classes("flex-1"):
+                                                                            with ui.row().classes("items-center"):
+                                                                                ui.label(t.display_name).classes("text-lg font-bold truncate")
+                                                                                if t.rate_limit_count > 0:
+                                                                                    ui.badge(f"{t.rate_limit_count}/{t.rate_limit_period}s", color="orange").props("outline")
+                                                                            ui.label(t.name).classes("text-xs text-slate-400 font-mono")
+                                                                        
+                                                                        async def toggle_tool(tool_name, field, value):
+                                                                            async with database.AsyncSessionLocal() as session_int:
+                                                                                await session_int.execute(
+                                                                                    update(Tool).where(Tool.name == tool_name).values({field: value})
+                                                                                )
+                                                                                await session_int.commit()
+                                                                            ui.notify(f"已更新 {tool_name}")
+                                
+                                                                        with ui.column().classes("items-end gap-1"):
+                                                                            ui.switch("启用", value=t.is_enabled, 
+                                                                                     on_change=lambda e, name=t.name: toggle_tool(name, "is_enabled", e.value)).props("dense")
+                                                                            ui.switch("游客", value=t.is_guest_allowed, 
+                                                                                     on_change=lambda e, name=t.name: toggle_tool(name, "is_guest_allowed", e.value)).props("dense")
+                                                                            
+                                                                            async def open_settings(tool_obj):
+                                                                                with ui.dialog() as settings_dialog, ui.card().classes("p-6 w-full max-w-sm"):
+                                                                                    ui.label(f"配置 - {tool_obj.display_name}").classes("text-h6 mb-4")
+                                                                                    limit_input = ui.number("速率限制 (次数)", value=tool_obj.rate_limit_count, format="%.0f", help="0 表示不限制").classes("w-full")
+                                                                                    period_input = ui.number("统计周期 (秒)", value=tool_obj.rate_limit_period, format="%.0f").classes("w-full")
+                                                                                    
+                                                                                    with ui.row().classes("w-full justify-end mt-6 gap-2"):
+                                                                                        ui.button("取消", on_click=settings_dialog.close).props("flat")
+                                                                                        async def save_tool_settings():
+                                                                                            async with database.AsyncSessionLocal() as session_save:
+                                                                                                await session_save.execute(
+                                                                                                    update(Tool).where(Tool.name == tool_obj.name).values({
+                                                                                                        "rate_limit_count": int(limit_input.value or 0),
+                                                                                                        "rate_limit_period": int(period_input.value or 60)
+                                                                                                    })
+                                                                                                )
+                                                                                                await session_save.commit()
+                                                                                            ui.notify("工具配置已保存")
+                                                                                            settings_dialog.close()
+                                                                                            refresh_tool_list.refresh()
+                                                                                        ui.button("保存", on_click=save_tool_settings).props("elevated")
+                                                                                settings_dialog.open()
+                                
+                                                                            ui.button(icon="settings", on_click=lambda t_obj=t: open_settings(t_obj)).props("flat dense size=sm color=grey")
+                                
                     await refresh_tool_list()
 
                             # --- 系统更新 ---
