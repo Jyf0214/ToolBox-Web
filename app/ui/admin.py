@@ -181,6 +181,7 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                     nav_settings = ui.button("站点设置", icon="settings", on_click=lambda: switch_to("settings")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     nav_tools = ui.button("工具管理", icon="build", on_click=lambda: switch_to("tools")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     nav_update = ui.button("系统更新", icon="system_update", on_click=lambda: switch_to("update")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
+                    nav_maintenance = ui.button("系统维护", icon="handyman", on_click=lambda: switch_to("maintenance")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     nav_logs = ui.button("访问日志", icon="list_alt", on_click=lambda: switch_to("logs")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     
                     ui.separator().classes("my-4")
@@ -192,7 +193,7 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                 for k, v in sections.items():
                     v.set_visibility(k == name)
                 # Update nav styles
-                for btn, n in [(nav_dashboard, "dashboard"), (nav_settings, "settings"), (nav_tools, "tools"), (nav_update, "update"), (nav_logs, "logs")]:
+                for btn, n in [(nav_dashboard, "dashboard"), (nav_settings, "settings"), (nav_tools, "tools"), (nav_update, "update"), (nav_maintenance, "maintenance"), (nav_logs, "logs")]:
                     if n == name:
                         btn.classes(add="bg-primary text-white", remove="text-slate-600")
                     else:
@@ -451,7 +452,85 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
 
                 
 
-                            # --- 访问日志 ---
+                            # --- 系统维护 ---
+            with ui.column().classes("w-full hidden") as sections["maintenance"]:
+                ui.label("系统维护").classes("text-2xl font-bold mb-6")
+                
+                with ui.grid(columns=(1, 'md:2')).classes("w-full gap-6"):
+                    # 数据库清理卡片
+                    with ui.card().classes("p-6 shadow-sm border"):
+                        with ui.row().classes("items-center mb-4"):
+                            ui.icon("delete_sweep", color="warning", size="md").classes("mr-2")
+                            ui.label("数据库清理").classes("text-xl font-bold")
+                        ui.label("识别并删除数据库中不再使用的孤儿表。").classes("text-sm text-slate-500 mb-6")
+                        
+                        async def scan_and_clean_db():
+                            if not state.db_connected: return
+                            try:
+                                from sqlalchemy import inspect, text
+                                async with database.engine.connect() as conn:
+                                    # 获取当前数据库中所有的表名
+                                    def get_tables(connection):
+                                        return inspect(connection).get_table_names()
+                                    
+                                    db_tables = await conn.run_sync(get_tables)
+                                    # 获取模型中定义的表名
+                                    model_tables = set(database.Base.metadata.tables.keys())
+                                    
+                                    orphan_tables = [t for t in db_tables if t not in model_tables]
+                                    
+                                    if not orphan_tables:
+                                        ui.notify("未发现冗余表，数据库很干净。", color="positive")
+                                        return
+                                    
+                                    with ui.dialog() as clean_confirm, ui.card().classes("p-6"):
+                                        ui.label("发现冗余表").classes("text-h6 mb-2")
+                                        ui.label(f"以下表不再被系统使用，确认删除吗？").classes("text-sm text-slate-500 mb-4")
+                                        with ui.column().classes("bg-slate-100 p-2 rounded mb-6 w-full"):
+                                            for ot in orphan_tables:
+                                                ui.label(f"• {ot}").classes("text-xs font-mono text-negative")
+                                        
+                                        with ui.row().classes("w-full justify-end gap-2"):
+                                            ui.button("取消", on_click=clean_confirm.close).props("flat")
+                                            async def do_clean():
+                                                async with database.engine.begin() as conn_del:
+                                                    for ot in orphan_tables:
+                                                        await conn_del.execute(text(f"DROP TABLE IF EXISTS `{ot}`"))
+                                                ui.notify(f"已清理 {len(orphan_tables)} 个冗余表", color="positive")
+                                                clean_confirm.close()
+                                            ui.button("确认删除", on_click=do_clean).props("elevated color=negative")
+                                    clean_confirm.open()
+                            except Exception as e_clean:
+                                ui.notify(f"扫描失败: {e_clean}", color="negative")
+
+                        ui.button("扫描冗余表", icon="search", on_click=scan_and_clean_db).classes("w-full").props("outline")
+
+                    # 日志清理卡片
+                    with ui.card().classes("p-6 shadow-sm border"):
+                        with ui.row().classes("items-center mb-4"):
+                            ui.icon("history_toggle_off", color="info", size="md").classes("mr-2")
+                            ui.label("日志管理").classes("text-xl font-bold")
+                        ui.label("清空访客记录。这不会影响管理员账号或工具设置。").classes("text-sm text-slate-500 mb-6")
+                        
+                        async def clear_logs_action():
+                            with ui.dialog() as log_confirm, ui.card().classes("p-6"):
+                                ui.label("确认清空访问日志？").classes("text-h6 mb-2")
+                                ui.label("此操作不可恢复。").classes("text-sm text-slate-500 mb-6")
+                                with ui.row().classes("w-full justify-end gap-2"):
+                                    ui.button("取消", on_click=log_confirm.close).props("flat")
+                                    async def do_clear_logs():
+                                        async with database.AsyncSessionLocal() as session:
+                                            from sqlalchemy import delete
+                                            await session.execute(delete(Guest))
+                                            await session.commit()
+                                        ui.notify("访问日志已清空", color="positive")
+                                        log_confirm.close()
+                                    ui.button("确认清空", on_click=do_clear_logs).props("elevated color=negative")
+                            log_confirm.open()
+
+                        ui.button("清空访客日志", icon="delete", on_click=clear_logs_action).classes("w-full").props("outline color=negative")
+
+            # --- 访问日志 ---
 
                 
 
