@@ -183,6 +183,8 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                     nav_update = ui.button("系统更新", icon="system_update", on_click=lambda: switch_to("update")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     nav_maintenance = ui.button("系统维护", icon="handyman", on_click=lambda: switch_to("maintenance")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     nav_queue = ui.button("队列监控", icon="reorder", on_click=lambda: switch_to("queue")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
+                    nav_status = ui.button("系统状态", icon="analytics", on_click=lambda: switch_to("status")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
+                    nav_smtp = ui.button("邮件设置", icon="email", on_click=lambda: switch_to("smtp")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     nav_logs = ui.button("访问日志", icon="list_alt", on_click=lambda: switch_to("logs")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     
                     ui.separator().classes("my-4")
@@ -194,7 +196,7 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                 for k, v in sections.items():
                     v.set_visibility(k == name)
                 # Update nav styles
-                for btn, n in [(nav_dashboard, "dashboard"), (nav_settings, "settings"), (nav_tools, "tools"), (nav_update, "update"), (nav_maintenance, "maintenance"), (nav_queue, "queue"), (nav_logs, "logs")]:
+                for btn, n in [(nav_dashboard, "dashboard"), (nav_settings, "settings"), (nav_tools, "tools"), (nav_update, "update"), (nav_maintenance, "maintenance"), (nav_queue, "queue"), (nav_status, "status"), (nav_smtp, "smtp"), (nav_logs, "logs")]:
                     if n == name:
                         btn.classes(add="bg-primary text-white", remove="text-slate-600")
                     else:
@@ -618,6 +620,142 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
 
                 refresh_admin_queue()
                 ui.timer(2.0, refresh_admin_queue.refresh)
+
+            # --- 系统状态 ---
+            with ui.column().classes("w-full hidden") as sections["status"]:
+                ui.label("系统状态").classes("text-2xl font-bold mb-6")
+                
+                with ui.grid(columns=(1, 'md:2', 'lg:3')).classes("w-full gap-6 mb-6"):
+                    # CPU Usage Card
+                    with ui.card().classes("p-6 shadow-sm border"):
+                        ui.label("CPU 使用率").classes("text-lg font-bold mb-2")
+                        cpu_usage_percent_label = ui.label("N/A").classes("text-4xl font-bold text-primary")
+                        ui.label("%").classes("text-lg self-center")
+
+                    # Memory Usage Card
+                    with ui.card().classes("p-6 shadow-sm border"):
+                        ui.label("内存占用").classes("text-lg font-bold mb-2")
+                        mem_usage_percent_label = ui.label("N/A").classes("text-4xl font-bold text-secondary")
+                        mem_total_label = ui.label("Total: N/A GB").classes("text-xs text-slate-500")
+                        mem_used_label = ui.label("Used: N/A GB").classes("text-xs text-slate-500")
+
+                    # Task Queue Status Card
+                    with ui.card().classes("p-6 shadow-sm border"):
+                        ui.label("任务队列状态").classes("text-lg font-bold mb-2")
+                        waiting_label = ui.label("等待中: N/A").classes("text-base")
+                        active_label = ui.label("处理中: N/A").classes("text-base")
+                        max_concurrent_label = ui.label("最大并发: N/A").classes("text-base")
+
+                # Real-time Updates for System Stats and Queue
+                from app.core.task_manager import global_task_manager
+                async def update_system_info():
+                    stats = global_task_manager.get_system_stats()
+                    cpu_usage_percent_label.set_text(f"{stats['cpu_percent']:.1f}" if stats['cpu_percent'] is not None else "N/A")
+                    mem_usage_percent_label.set_text(f"{stats['memory_percent']:.1f}" if stats['memory_percent'] is not None else "N/A")
+                    mem_total_label.set_text(f"Total: {stats['memory_total']} GB" if stats['memory_total'] is not None else "Total: N/A GB")
+                    mem_used_label.set_text(f"Used: {stats['memory_used']} GB" if stats['memory_used'] is not None else "Used: N/A GB")
+
+                    queue_status = global_task_manager.get_status()
+                    waiting_label.set_text(f"等待中: {queue_status['waiting_count']}")
+                    active_label.set_text(f"处理中: {queue_status['active_count']} / {queue_status['max_concurrent']}")
+                    max_concurrent_label.set_text(f"最大并发: {queue_status['max_concurrent']}")
+
+                # Timer for updates
+                ui.timer(2.0, update_system_info)
+                await update_system_info() # Initial load
+
+                # Historical Tasks
+                ui.separator(classes="my-8")
+                ui.label("历史任务记录").classes("text-xl font-bold mb-4")
+                
+                if not state.db_connected:
+                    ui.label("数据库未连接，无法加载历史任务。").classes("text-negative")
+                else:
+                    @ui.refreshable
+                    async def task_history_table():
+                        async with database.AsyncSessionLocal() as session:
+                            from sqlalchemy import select, desc
+                            result = await session.execute(select(TaskHistory).order_by(desc(TaskHistory.completed_at)).limit(50))
+                            tasks = result.scalars().all()
+                            
+                            if not tasks:
+                                ui.label("暂无历史任务记录。").classes("text-slate-400 italic")
+                                return
+
+                            with ui.card().classes("w-full p-0 overflow-hidden border shadow-sm"):
+                                with ui.column().classes("w-full divide-y"):
+                                    for task in tasks:
+                                        with ui.row().classes("w-full p-4 items-center justify-between hover:bg-slate-50 transition-colors"):
+                                            with ui.column().classes("gap-1 flex-1"):
+                                                ui.label(task.task_name or "Unnamed Task").classes("font-bold text-slate-700")
+                                                ui.label(f"ID: {task.task_id[:8]} | IP: {task.ip_address or 'N/A'} | User: {task.user_type}").classes("text-[10px] text-slate-500 font-mono")
+                                                if task.filename:
+                                                    ui.label(f"File: {task.filename}").classes("text-xs text-slate-600 truncate max-w-[300px]")
+                                            with ui.column().classes("items-center"):
+                                                status_color = "positive" if task.status == "completed" else ("negative" if task.status == "failed" else "info")
+                                                status_icon = "check_circle" if task.status == "completed" else ("error" if task.status == "failed" else "hourglass_bottom")
+                                                ui.icon(status_icon, color=status_color).classes("mb-1")
+                                                ui.label(task.status.capitalize()).classes(f"text-xs font-bold text-{status_color}")
+                                                ui.label(f"Duration: {task.duration}s" if task.duration is not None else "").classes("text-[10px] text-slate-400")
+                                            with ui.column().classes("items-end"):
+                                                ui.label(task.completed_at.strftime('%Y-%m-%d')).classes("text-xs font-bold text-slate-600")
+                                                ui.label(task.completed_at.strftime('%H:%M:%S')).classes("text-[10px] text-slate-400")
+                    
+                    await task_history_table()
+                    ui.timer(5.0, task_history_table.refresh) # Refresh history less frequently
+
+            # --- 邮件设置 ---
+            with ui.column().classes("w-full hidden") as sections["smtp"]:
+                ui.label("邮件通知设置").classes("text-2xl font-bold mb-6")
+                ui.markdown("配置 SMTP 服务器以接收通知。").classes("text-sm text-slate-500 mb-6")
+                
+                smtp_enabled = await get_setting("smtp_enabled", "false")
+                smtp_host = await get_setting("smtp_host")
+                smtp_port = await get_setting("smtp_port", "465")
+                smtp_user = await get_setting("smtp_user")
+                smtp_password = await get_setting("smtp_password")
+                smtp_from = await get_setting("smtp_from", smtp_user)
+
+                enable_switch = ui.switch("启用邮件通知", value=(smtp_enabled.lower() == "true"))
+                host_input = ui.input("SMTP 服务器主机", value=smtp_host).classes("w-full").props("outlined dense")
+                port_input = ui.number("端口", value=int(smtp_port) if smtp_port else 465, format="%.0f").classes("w-full").props("outlined dense min=1 max=65535")
+                user_input = ui.input("SMTP 用户名", value=smtp_user).classes("w-full").props("outlined dense")
+                pwd_input = ui.input("SMTP 密码", password=True, password_toggle_button=True).classes("w-full").props("outlined dense")
+                from_input = ui.input("发件人地址", value=smtp_from).classes("w-full").props("outlined dense")
+                
+                async def save_smtp_settings():
+                    await set_setting("smtp_enabled", str(enable_switch.value))
+                    await set_setting("smtp_host", host_input.value)
+                    await set_setting("smtp_port", str(port_input.value))
+                    await set_setting("smtp_user", user_input.value)
+                    await set_setting("smtp_password", pwd_input.value)
+                    await set_setting("smtp_from", from_input.value)
+                    ui.notify("SMTP 设置已保存", color="positive")
+
+                ui.button("保存设置", on_click=save_smtp_settings, icon="save").classes("mt-6 px-6")
+                
+                # Test Email Button
+                async def send_test_email():
+                    if not enable_switch.value:
+                        ui.notify("邮件通知未启用", color="warning")
+                        return
+                    
+                    test_email_addr = await get_setting("smtp_user") # Test to the SMTP user's inbox
+                    if not test_email_addr:
+                         ui.notify("SMTP 用户名未设置，无法发送测试邮件", color="warning")
+                         return
+
+                    subject = "ToolBox SMTP 测试邮件"
+                    body = "这是一封来自 ToolBox 的 SMTP 测试邮件，用于验证配置是否正确。"
+                    
+                    sent = await send_email(test_email_addr, subject, body)
+                    if sent:
+                        ui.notify(f"测试邮件已发送到 {test_email_addr}", color="positive")
+                    else:
+                        ui.notify(f"发送测试邮件失败，请检查 SMTP 配置和日志。", color="negative")
+                
+                ui.button("发送测试邮件", on_click=send_test_email, icon="send").classes("mt-2 px-4").props("outline")
+
 
             # --- 访问日志 ---
 
