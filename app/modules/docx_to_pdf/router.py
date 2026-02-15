@@ -1,5 +1,4 @@
 import os
-import shutil
 import uuid
 import asyncio
 from app.modules.base import BaseModule
@@ -47,6 +46,7 @@ class DocxToPdfModule(BaseModule):
         if not add_blank_page:
             return True
         try:
+            import shutil
             from PyPDF2 import PdfReader, PdfWriter
 
             reader = PdfReader(pdf_path)
@@ -58,6 +58,7 @@ class DocxToPdfModule(BaseModule):
                 last_page = reader.pages[-1]
                 width = float(last_page.mediabox.width)
                 height = float(last_page.mediabox.height)
+
                 from reportlab.pdfgen import canvas
 
                 blank_pdf_path = pdf_path.replace(".pdf", "_blank.pdf")
@@ -292,6 +293,8 @@ class DocxToPdfModule(BaseModule):
 
                     with open(input_path, "wb") as f:
                         f.write(state["content"])
+
+                    import shutil
 
                     libreoffice_path = (
                         shutil.which("libreoffice") or "/usr/bin/libreoffice"

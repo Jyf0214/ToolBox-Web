@@ -1,10 +1,10 @@
-import bcrypt
-import httpx
 from nicegui import app
 
 
 async def verify_turnstile(token: str, secret_key: str) -> bool:
     """后端验证 Cloudflare Turnstile Token"""
+    import httpx
+
     if not token:
         return False
     try:
@@ -23,11 +23,15 @@ async def verify_turnstile(token: str, secret_key: str) -> bool:
 
 def get_password_hash(password: str) -> str:
     """使用 bcrypt 对密码进行哈希处理"""
+    import bcrypt
+
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """验证明文密码与哈希值是否匹配"""
+    import bcrypt
+
     return bcrypt.checkpw(
         plain_password.encode("utf-8"), hashed_password.encode("utf-8")
     )

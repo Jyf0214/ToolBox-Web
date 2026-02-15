@@ -3,7 +3,6 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
-import psutil
 
 # 数据库相关
 from sqlalchemy import insert
@@ -120,11 +119,14 @@ class TaskManager:
         }
 
     def get_system_stats(self):
+        import psutil
+
+        vm = psutil.virtual_memory()
         return {
             "cpu_percent": psutil.cpu_percent(),
-            "memory_percent": psutil.virtual_memory().percent,
-            "memory_total": round(psutil.virtual_memory().total / (1024**3), 2),
-            "memory_available": round(psutil.virtual_memory().available / (1024**3), 2),
+            "memory_percent": vm.percent,
+            "memory_total": round(vm.total / (1024**3), 2),
+            "memory_available": round(vm.available / (1024**3), 2),
         }
 
 
