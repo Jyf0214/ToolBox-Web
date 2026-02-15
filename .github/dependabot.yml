@@ -8,7 +8,12 @@ updates:
     directory: "/"
     schedule:
       interval: "daily" # 每天检查一次版本更新
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 1
+    # 核心修改：将所有更新合并到一个 PR 中
+    groups:
+      all-python-dependencies:
+        patterns:
+          - "*"
     labels:
       - "dependencies"
       - "python"
@@ -18,3 +23,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      all-actions:
+        patterns:
+          - "*"
