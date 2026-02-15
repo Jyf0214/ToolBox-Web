@@ -59,7 +59,35 @@ async def startup_handler(state, modules_list, module_instances_dict):
 
         async with database.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        print("数据库初始化成功。")
+
+            # --- 自动热补丁: 补全缺失的列 (SQLAlchemy create_all 不处理 Alter) ---
+            from sqlalchemy import text
+
+            print("正在检查数据库表结构一致性...")
+
+            # 补齐 tools 表的列
+            columns_to_add = [
+                ("requires_captcha", "BOOLEAN DEFAULT FALSE NOT NULL"),
+                ("rate_limit_count", "INTEGER DEFAULT 0 NOT NULL"),
+                ("rate_limit_period", "INTEGER DEFAULT 60 NOT NULL"),
+            ]
+
+            for col_name, col_def in columns_to_add:
+                try:
+                    await conn.execute(
+                        text(f"ALTER TABLE tools ADD COLUMN {col_name} {col_def}")
+                    )
+                    print(f"补全成功: tools.{col_name}")
+                except Exception as e:
+                    if (
+                        "Duplicate column name" in str(e)
+                        or "already exists" in str(e).lower()
+                    ):
+                        pass  # 已存在，忽略
+                    else:
+                        print(f"同步 tools.{col_name} 失败: {e}")
+
+        print("数据库初始化与同步成功。")
     except Exception as e:
         import traceback
 
