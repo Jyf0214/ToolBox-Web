@@ -46,6 +46,11 @@ def create_main_page(state, modules):
             with ui.row().classes("items-center"):
                 ui.label(site_title).classes("text-2xl font-bold text-white")
                 ui.label(f"v{settings.VERSION}").classes("text-xs text-slate-300 ml-2")
+                ui.button(
+                    "许可", on_click=lambda: ui.navigate.to("/about/licenses")
+                ).props("flat color=white size=sm").classes(
+                    "ml-4 opacity-70 hover:opacity-100"
+                )
             if state.db_connected:
                 with ui.row().classes("items-center gap-4"):
                     # 队列状态组件

@@ -8,6 +8,7 @@ from app.api.tracking import setup_tracking_api
 from app.ui.setup import create_setup_page
 from app.ui.main_page import create_main_page
 from app.ui.admin import create_admin_page
+from app.ui.licenses_page import create_licenses_page
 from app.core.settings_manager import get_local_secret
 
 
@@ -90,6 +91,7 @@ app.include_router(setup_tracking_api(state))
 # 注册 UI 页面
 create_setup_page(state)
 create_main_page(state, modules)
+create_licenses_page()
 create_admin_page(
     state,
     lambda: load_modules(modules, module_instances),
