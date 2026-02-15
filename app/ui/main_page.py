@@ -47,6 +47,26 @@ def create_main_page(state, modules):
                 ui.label(site_title).classes("text-2xl font-bold text-white")
                 ui.label(f"v{settings.VERSION}").classes("text-xs text-slate-300 ml-2")
             if state.db_connected:
+                with ui.row().classes("items-center gap-4"):
+                    # 队列状态组件
+                    from app.core.task_manager import global_task_manager
+                    
+                    @ui.refreshable
+                    def queue_status_ui():
+                        status = global_task_manager.get_status()
+                        with ui.row().classes("items-center bg-slate-700 rounded-full px-3 py-1 gap-2 border border-slate-600"):
+                            if status["active_count"] >= status["max_concurrent"]:
+                                ui.icon("hourglass_empty", color="orange").classes("text-sm")
+                                ui.label(f"排队中: {status['waiting_count']}").classes("text-[10px] text-orange-300")
+                            else:
+                                ui.icon("check_circle", color="green").classes("text-sm")
+                                ui.label("空闲").classes("text-[10px] text-green-300")
+                            with ui.tooltip(f"并发限制: {status['max_concurrent']} | 正在处理: {status['active_count']}"):
+                                ui.label("详情").classes("text-[10px] text-slate-400 underline cursor-help")
+                    
+                    queue_status_ui()
+                    ui.timer(3.0, queue_status_ui.refresh)
+
                 ui.button(
                     icon="settings", on_click=lambda: ui.navigate.to("/admin")
                 ).props("flat color=white")

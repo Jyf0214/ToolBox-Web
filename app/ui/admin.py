@@ -182,6 +182,7 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                     nav_tools = ui.button("工具管理", icon="build", on_click=lambda: switch_to("tools")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     nav_update = ui.button("系统更新", icon="system_update", on_click=lambda: switch_to("update")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     nav_maintenance = ui.button("系统维护", icon="handyman", on_click=lambda: switch_to("maintenance")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
+                    nav_queue = ui.button("队列监控", icon="reorder", on_click=lambda: switch_to("queue")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     nav_logs = ui.button("访问日志", icon="list_alt", on_click=lambda: switch_to("logs")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
                     
                     ui.separator().classes("my-4")
@@ -193,7 +194,7 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                 for k, v in sections.items():
                     v.set_visibility(k == name)
                 # Update nav styles
-                for btn, n in [(nav_dashboard, "dashboard"), (nav_settings, "settings"), (nav_tools, "tools"), (nav_update, "update"), (nav_maintenance, "maintenance"), (nav_logs, "logs")]:
+                for btn, n in [(nav_dashboard, "dashboard"), (nav_settings, "settings"), (nav_tools, "tools"), (nav_update, "update"), (nav_maintenance, "maintenance"), (nav_queue, "queue"), (nav_logs, "logs")]:
                     if n == name:
                         btn.classes(add="bg-primary text-white", remove="text-slate-600")
                     else:
@@ -564,6 +565,59 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                             log_confirm.open()
 
                         ui.button("清空访客日志", icon="delete", on_click=clear_logs_action).classes("w-full").props("outline color=negative")
+
+            # --- 队列监控 ---
+            with ui.column().classes("w-full hidden") as sections["queue"]:
+                from app.core.task_manager import global_task_manager
+                ui.label("队列监控").classes("text-2xl font-bold mb-6")
+                
+                with ui.card().classes("w-full p-6 mb-6 shadow-sm border"):
+                    ui.label("并发控制").classes("text-lg font-bold mb-4")
+                    with ui.row().classes("items-center gap-4"):
+                        ui.label("全局最大同时处理任务数:")
+                        n_input = ui.number(value=global_task_manager.max_concurrent_tasks, min=1, max=10).props("outlined dense")
+                        def update_max():
+                            global_task_manager.max_concurrent_tasks = int(n_input.value)
+                            ui.notify(f"已更新最大并发数为 {n_input.value}")
+                        ui.button("保存", on_click=update_max).props("flat")
+
+                @ui.refreshable
+                def refresh_admin_queue():
+                    with ui.card().classes("w-full p-6 shadow-sm border"):
+                        ui.label("实时队列").classes("text-lg font-bold mb-4")
+                        
+                        active = list(global_task_manager.active_tasks.values())
+                        waiting = global_task_manager.queue
+                        
+                        if not active and not waiting:
+                            ui.label("当前无活跃任务").classes("text-slate-400 italic")
+                            return
+
+                        with ui.column().classes("w-full gap-4"):
+                            if active:
+                                ui.label(f"正在处理 ({len(active)})").classes("text-sm font-bold text-green-600")
+                                for t in active:
+                                    with ui.row().classes("w-full p-3 bg-green-50 rounded-lg items-center justify-between"):
+                                        with ui.column():
+                                            ui.label(t.name).classes("font-bold")
+                                            ui.label(f"ID: {t.id} | IP: {t.ip}").classes("text-[10px] text-slate-500 font-mono")
+                                        with ui.column().classes("items-end"):
+                                            ui.label(t.filename or "无文件").classes("text-xs text-slate-600 truncate max-w-[200px]")
+                                            ui.label("正在执行...").classes("text-[10px] text-green-500 animate-pulse")
+                            
+                            if waiting:
+                                ui.label(f"等待中 ({len(waiting)})").classes("text-sm font-bold text-orange-600")
+                                for i, t in enumerate(waiting):
+                                    with ui.row().classes("w-full p-3 bg-slate-50 rounded-lg items-center justify-between"):
+                                        with ui.row().classes("items-center"):
+                                            ui.label(str(i+1)).classes("bg-orange-200 text-orange-800 rounded-full w-5 h-5 text-center text-[10px] leading-5 mr-3")
+                                            with ui.column():
+                                                ui.label(t.name).classes("font-bold text-slate-700")
+                                                ui.label(f"ID: {t.id} | IP: {t.ip}").classes("text-[10px] text-slate-500 font-mono")
+                                        ui.label(t.filename or "无文件").classes("text-xs text-slate-400")
+
+                refresh_admin_queue()
+                ui.timer(2.0, refresh_admin_queue.refresh)
 
             # --- 访问日志 ---
 

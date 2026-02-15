@@ -170,13 +170,56 @@ class DocxToPdfModule(BaseModule):
                 if not state["content"]:
                     return
 
+                from app.core.task_manager import global_task_manager
+                from app.core.auth import is_authenticated
+                from fastapi import Request
+                
+                # 获取客户端 IP
+                client_ip = "Unknown"
+                try:
+                    # 获取 request 对象稍微有点麻烦，因为 nicegui 的回调不直接带它
+                    # 但我们可以尝试从 app.storage.user 获取或简单占位
+                    client_ip = app.storage.browser.get('id', 'Anonymous')
+                except: pass
+
                 state["processing"] = True
                 convert_btn.disable()
-                status_label.set_text("正在启动转换引擎...")
-                progress_bar.set_value(0.6)
+                
+                # 1. 加入队列
+                task = await global_task_manager.add_task(
+                    name="Word 转 PDF",
+                    user_type="admin" if is_authenticated() else "guest",
+                    ip=client_ip,
+                    filename=state["name"]
+                )
+                
+                status_label.set_visibility(True)
+                progress_bar.set_visibility(True)
                 result_card.set_visibility(False)
-
+                
                 try:
+                    # 2. 等待排队
+                    while True:
+                        active_count = len(global_task_manager.active_tasks)
+                        waiting_ids = [t.id for t in global_task_manager.queue]
+                        
+                        if task.id in waiting_ids:
+                            pos = waiting_ids.index(task.id) + 1
+                            status_label.set_text(f"排队中: 前方有 {pos-1} 个任务...")
+                        else:
+                            status_label.set_text("轮到你了，正在准备处理...")
+                        
+                        if task.id not in waiting_ids and task.id in global_task_manager.active_tasks:
+                            break # 已经开始处理
+                            
+                        # 每秒检查一次状态，或者依赖 start_task 的内部 Condition
+                        # 这里我们直接调用 start_task，它会阻塞直到轮到我们
+                        await global_task_manager.start_task(task.id)
+                        break
+
+                    status_label.set_text("正在启动转换引擎...")
+                    progress_bar.set_value(0.6)
+
                     file_id = str(uuid.uuid4())
                     input_path = os.path.join(self.temp_dir, f"{file_id}.docx")
                     output_path = os.path.join(self.temp_dir, f"{file_id}.pdf")
@@ -259,6 +302,8 @@ class DocxToPdfModule(BaseModule):
                     ui.notify("程序出错", color="negative")
                     show_error_report(str(ex))
                 finally:
+                    # 3. 释放任务
+                    await global_task_manager.complete_task(task.id)
                     state["processing"] = False
                     convert_btn.enable()
                     if input_path and os.path.exists(input_path):
