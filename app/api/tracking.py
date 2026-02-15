@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from nicegui import ui
 from sqlalchemy import select
@@ -17,7 +17,7 @@ class GuestData(BaseModel):
 
 
 async def get_or_create_guest(
-    fingerprint: str, ip: str, initialized_event: asyncio.Event, db_connected: bool
+    fingerprint: str, ip: str, user_agent: str, initialized_event: asyncio.Event, db_connected: bool
 ):
     try:
         await asyncio.wait_for(initialized_event.wait(), timeout=10)
@@ -33,22 +33,30 @@ async def get_or_create_guest(
             select(Guest).where(Guest.fingerprint == fingerprint)
         )
         guest = result.scalars().first()
+        
+        metadata = {"user_agent": user_agent}
+        
         if not guest:
-            guest = Guest(fingerprint=fingerprint, ip_address=ip)
+            guest = Guest(
+                fingerprint=fingerprint, 
+                ip_address=ip,
+                metadata_json=metadata
+            )
             session.add(guest)
         else:
             guest.ip_address = ip
             guest.last_seen = datetime.utcnow()
+            guest.metadata_json = metadata
         await session.commit()
 
 
 # 注意：这个路由需要能够访问全局状态 state
-# 我们将在 main.py 中通过依赖或闭包来注册它，或者直接在这里引用
 def setup_tracking_api(state):
     @router.post("/track_guest")
-    async def track_guest(data: GuestData):
+    async def track_guest(data: GuestData, request: Request):
+        user_agent = request.headers.get("user-agent", "Unknown")
         await get_or_create_guest(
-            data.fingerprint, data.ip, state.initialized, state.db_connected
+            data.fingerprint, data.ip, user_agent, state.initialized, state.db_connected
         )
         return {"status": "ok"}
 

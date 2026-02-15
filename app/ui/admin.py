@@ -451,26 +451,219 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
 
                 
 
-                # --- 访问日志 ---
-                with ui.column().classes("w-full hidden") as sections["logs"]:
-                    ui.label("最近访客").classes("text-2xl font-bold mb-6")
-                    if state.db_connected:
-                        async with database.AsyncSessionLocal() as session:
-                            res = await session.execute(select(Guest).order_by(Guest.last_seen.desc()).limit(20))
-                            guests = res.scalars().all()
-                            if not guests:
-                                ui.label("尚无访问记录").classes("text-slate-400 italic")
-                            else:
-                                with ui.card().classes("w-full p-0 overflow-hidden border"):
-                                    with ui.column().classes("w-full divide-y"):
-                                        for g in guests:
-                                            with ui.row().classes("w-full p-4 items-center justify-between hover:bg-slate-50"):
-                                                with ui.row().classes("items-center"):
-                                                    ui.icon("public", color="slate-400").classes("mr-3")
-                                                    ui.label(g.ip_address).classes("font-mono font-bold")
-                                                ui.label(g.last_seen.strftime('%Y-%m-%d %H:%M:%S')).classes("text-xs text-slate-500")
-                    else:
-                        ui.label("数据库未连接").classes("text-negative")
+                            # --- 访问日志 ---
+
+                
+
+                            with ui.column().classes("w-full hidden") as sections["logs"]:
+
+                
+
+                                ui.label("最近访客").classes("text-2xl font-bold mb-6")
+
+                
+
+                                if state.db_connected:
+
+                
+
+                                    async with database.AsyncSessionLocal() as session:
+
+                
+
+                                        res = await session.execute(select(Guest).order_by(Guest.last_seen.desc()).limit(30))
+
+                
+
+                                        guests = res.scalars().all()
+
+                
+
+                                        
+
+                
+
+                                        if not guests:
+
+                
+
+                                            ui.label("尚无访问记录").classes("text-slate-400 italic")
+
+                
+
+                                        else:
+
+                
+
+                                            with ui.card().classes("w-full p-0 overflow-hidden border shadow-sm"):
+
+                
+
+                                                with ui.column().classes("w-full divide-y"):
+
+                
+
+                                                    for g in guests:
+
+                
+
+                                                        with ui.row().classes("w-full p-4 items-center justify-between hover:bg-slate-50 transition-colors"):
+
+                
+
+                                                            with ui.column().classes("gap-1"):
+
+                
+
+                                                                with ui.row().classes("items-center"):
+
+                
+
+                                                                    ui.icon("public", color="primary", size="xs").classes("mr-2")
+
+                
+
+                                                                    ui.label(g.ip_address).classes("font-mono font-bold text-slate-700")
+
+                
+
+                                                                
+
+                
+
+                                                                # 解析简单的 UA 信息
+
+                
+
+                                                                ua = "Unknown"
+
+                
+
+                                                                if g.metadata_json and isinstance(g.metadata_json, dict):
+
+                
+
+                                                                    ua = g.metadata_json.get("user_agent", "Unknown")
+
+                
+
+                                                                
+
+                
+
+                                                                def parse_ua(ua_str):
+
+                
+
+                                                                    if not ua_str or ua_str == "Unknown": return "未知设备"
+
+                
+
+                                                                    res_browser = "Other"
+
+                
+
+                                                                    if "Chrome" in ua_str: res_browser = "Chrome"
+
+                
+
+                                                                    if "Firefox" in ua_str: res_browser = "Firefox"
+
+                
+
+                                                                    if "Safari" in ua_str and "Chrome" not in ua_str: res_browser = "Safari"
+
+                
+
+                                                                    if "Edge" in ua_str: res_browser = "Edge"
+
+                
+
+                                                                    
+
+                
+
+                                                                    res_os = "Unknown OS"
+
+                
+
+                                                                    if "Windows" in ua_str: res_os = "Windows"
+
+                
+
+                                                                    if "Macintosh" in ua_str: res_os = "macOS"
+
+                
+
+                                                                    if "Android" in ua_str: res_os = "Android"
+
+                
+
+                                                                    if "iPhone" in ua_str: res_os = "iOS"
+
+                
+
+                                                                    if "Linux" in ua_str and "Android" not in ua_str: res_os = "Linux"
+
+                
+
+                                                                    
+
+                
+
+                                                                    return f"{res_browser} on {res_os}"
+
+                
+
+                
+
+                
+
+                                                                with ui.row().classes("items-center text-xs text-slate-500"):
+
+                
+
+                                                                    ui.icon("devices", size="xs").classes("mr-1")
+
+                
+
+                                                                    summary = ui.label(parse_ua(ua))
+
+                
+
+                                                                    with ui.tooltip(ua):
+
+                
+
+                                                                        ui.label(ua).classes("text-xs")
+
+                
+
+                                                            
+
+                
+
+                                                            with ui.column().classes("items-end"):
+
+                
+
+                                                                ui.label(g.last_seen.strftime('%Y-%m-%d')).classes("text-xs font-bold text-slate-600")
+
+                
+
+                                                                ui.label(g.last_seen.strftime('%H:%M:%S')).classes("text-[10px] text-slate-400")
+
+                
+
+                                else:
+
+                
+
+                                    ui.label("数据库未连接").classes("text-negative")
+
+                
+
+                
 
                 switch_to("dashboard")
 
