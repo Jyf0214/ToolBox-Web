@@ -30,7 +30,7 @@ DEPENDENCIES = {
         "license_url": "https://raw.githubusercontent.com/pyca/bcrypt/main/LICENSE",
         "type": "Apache-2.0",
     },
-    "PyPDF2": {
+    "pypdf": {
         "repo": "https://github.com/py-pdf/pypdf",
         "license_url": "https://raw.githubusercontent.com/py-pdf/pypdf/main/LICENSE",
         "type": "BSD-3-Clause",

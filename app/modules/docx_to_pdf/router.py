@@ -35,7 +35,7 @@ class DocxToPdfModule(BaseModule):
 
     def _get_pdf_info(self, pdf_path: str) -> dict:
         try:
-            from PyPDF2 import PdfReader
+            from pypdf import PdfReader
 
             reader = PdfReader(pdf_path)
             return {"pages": len(reader.pages)}
@@ -48,7 +48,7 @@ class DocxToPdfModule(BaseModule):
             return True
         try:
             import shutil
-            from PyPDF2 import PdfReader, PdfWriter
+            from pypdf import PdfReader, PdfWriter
 
             reader = PdfReader(pdf_path)
             num_pages = len(reader.pages)
