@@ -381,10 +381,12 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                             "step": 1,
                             "last_request": now_req,
                         }
-                        print("\n" + "!" * 20 + " 重置验证 (第 1 步) " + "!" * 20)
-                        print(f"用户: {r_user_input.value} | IP: {client_ip}")
-                        print(f"验证码 1: {code}")
-                        print("!" * 60 + "\n")
+                        print("\n" + "!" * 20 + " 重置验证 (第 1 步) " + "!" * 20, flush=True)
+                        print(f"用户: {r_user_input.value} | IP: {client_ip}", flush=True)
+                        print(f"验证码 1: {code}", flush=True)
+                        print("!" * 60 + "\n", flush=True)
+                        import logging
+                        logging.getLogger("admin_reset").info(f"RESET_CODE_1: {code} for user {r_user_input.value}")
                         r_code_input.set_visibility(True)
                         r_user_input.disable()
                         status_msg.set_text("第 1 次验证：请输入终端显示的 32 位重置码")
@@ -407,10 +409,12 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                             info["step"] = 2
                             r_code_input.value = ""
                             status_msg.set_text("第 2 次验证：请输入终端显示的【新】验证码")
-                            print("\n" + "!" * 20 + " 重置验证 (第 2 步) " + "!" * 20)
-                            print(f"用户: {info['user']} | IP: {client_ip}")
-                            print(f"验证码 2: {new_code}")
-                            print("!" * 60 + "\n")
+                            print("\n" + "!" * 20 + " 重置验证 (第 2 步) " + "!" * 20, flush=True)
+                            print(f"用户: {info['user']} | IP: {client_ip}", flush=True)
+                            print(f"验证码 2: {new_code}", flush=True)
+                            print("!" * 60 + "\n", flush=True)
+                            import logging
+                            logging.getLogger("admin_reset").info(f"RESET_CODE_2: {new_code} for user {info['user']}")
                             ui.notify("验证码 2 已发送至终端", color="info")
                         elif info["step"] == 2:
                             status_msg.set_text("验证通过！现在可以重置密码或数据库。")
