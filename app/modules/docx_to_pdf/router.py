@@ -24,7 +24,9 @@ class DocxToPdfModule(BaseModule):
     def setup_api(self):
         @app.get(f"{self.router.prefix}/download/{{file_id}}")
         async def download_pdf(file_id: str):
-            file_path = os.path.join(self.temp_dir, f"{file_id}.pdf")
+            # 路径安全防护：强制仅提取文件名，防止穿越攻击
+            safe_id = os.path.basename(file_id)
+            file_path = os.path.join(self.temp_dir, f"{safe_id}.pdf")
             if os.path.exists(file_path):
                 return FileResponse(
                     file_path, media_type="application/pdf", filename="转换结果.pdf"
