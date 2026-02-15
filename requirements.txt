@@ -1,7 +1,7 @@
 nicegui==2.12.1
 sqlalchemy==2.0.45
 asyncmy==0.2.9
-cryptography==3.4.8
+cryptography==46.0.5
 python-dotenv==1.2.1
 bcrypt==4.0.1
 passlib==1.7.4
