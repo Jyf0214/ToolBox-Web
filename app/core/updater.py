@@ -109,6 +109,25 @@ def pull_updates() -> Tuple[bool, str]:
             return False, f"更新失败: {output_reset}"
 
 
+def check_critical_changes() -> List[str]:
+    """检查核心文件（Dockerfile, requirements.txt等）是否有变动"""
+    if not GIT_AVAILABLE:
+        return []
+    
+    critical_files = ["Dockerfile", "Dockerfile.base", "requirements.txt", "scripts/entrypoint.sh"]
+    changed_critical = []
+    
+    # 确保 FETCH_HEAD 已存在（在 check_for_updates 之后运行）
+    success, output = run_git_command(["git", "diff", "--name-only", "HEAD", "FETCH_HEAD"])
+    if success:
+        changed_files = output.splitlines()
+        for f in critical_files:
+            if f in changed_files:
+                changed_critical.append(f)
+                
+    return changed_critical
+
+
 def get_remote_changelog() -> Tuple[bool, str]:
     """从远程获取 CHANGELOG.md 内容"""
     if not GIT_AVAILABLE:

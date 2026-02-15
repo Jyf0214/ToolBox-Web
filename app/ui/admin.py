@@ -332,13 +332,63 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
 
                                     
 
-                                    # 日志对比区域
+                                                        # 日志对比区域
 
-                                    changelog_container = ui.column().classes("w-full mt-4 hidden")
+                                    
 
-                                    with changelog_container:
+                                                        changelog_container = ui.column().classes("w-full mt-4 hidden")
 
-                                        ui.separator().classes("mb-4")
+                                    
+
+                                                        critical_warning = ui.card().classes("w-full mb-4 bg-orange-50 border-orange-200 border hidden")
+
+                                    
+
+                                                        with critical_warning:
+
+                                    
+
+                                                            with ui.row().classes("items-center p-4"):
+
+                                    
+
+                                                                ui.icon("warning", color="orange", size="md").classes("mr-4")
+
+                                    
+
+                                                                with ui.column():
+
+                                    
+
+                                                                    ui.label("环境依赖变动提醒").classes("font-bold text-orange-800")
+
+                                    
+
+                                                                    critical_files_label = ui.label("").classes("text-xs text-orange-700")
+
+                                    
+
+                                                                    ui.label("建议在更新后重新构建或拉取最新的 Docker 镜像以确保系统稳定性。").classes("text-xs text-orange-600 mt-1")
+
+                                    
+
+                                    
+
+                                    
+
+                                                        with changelog_container:
+
+                                    
+
+                                                            ui.separator().classes("mb-4")
+
+                                    
+
+                                                            # ... 其余代码不变
+
+                                    
+
+                                    
 
                                         ui.label("更新日志对比").classes("text-sm font-bold text-slate-700 mb-2")
 
@@ -366,71 +416,171 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
 
                 
 
-                                        async def check_update():
+                                                                async def check_update():
 
-                                            check_btn.disable()
+                
 
-                                            status_label.set_text("正在同步远程仓库...")
+                                                                    check_btn.disable()
 
-                                            try:
+                
 
-                                                from app.core.updater import get_local_changelog, get_remote_changelog
+                                                                    status_label.set_text("正在同步远程仓库...")
 
-                                                has_up, local_v, remote_v, msg = await asyncio.get_event_loop().run_in_executor(None, check_for_updates)
+                
 
-                                                
+                                                                    try:
 
-                                                # 获取日志
+                
 
-                                                _, local_log = get_local_changelog()
+                                                                        from app.core.updater import get_local_changelog, get_remote_changelog, check_critical_changes
 
-                                                _, remote_log = await asyncio.get_event_loop().run_in_executor(None, get_remote_changelog)
+                
 
-                                                
+                                                                        has_up, local_v, remote_v, msg = await asyncio.get_event_loop().run_in_executor(None, check_for_updates)
 
-                                                local_scroll.clear()
+                
 
-                                                with local_scroll:
+                                                                        
 
-                                                    ui.markdown(local_log or "无日志")
+                
 
-                                                
+                                                                        # 检查核心文件变动
 
-                                                remote_scroll.clear()
+                
 
-                                                with remote_scroll:
+                                                                        critical_changes = await asyncio.get_event_loop().run_in_executor(None, check_critical_changes)
 
-                                                    ui.markdown(remote_log or "无日志")
+                
 
-                                                
+                                                                        if critical_changes:
 
-                                                changelog_container.set_visibility(True)
+                
 
-                                                status_label.set_text(msg)
+                                                                            critical_warning.set_visibility(True)
 
-                                                
+                
 
-                                                if has_up:
+                                                                            critical_files_label.set_text(f"检测到核心文件变动: {', '.join(critical_changes)}")
 
-                                                    info_label.set_text(f"检测到新版本: v{remote_v} (当前: v{local_v})")
+                
 
-                                                    pull_btn.set_visibility(True)
+                                                                        else:
 
-                                                else:
+                
 
-                                                    info_label.set_text(f"您已经是最新版本 (v{local_v})")
+                                                                            critical_warning.set_visibility(False)
 
-                                                    pull_btn.set_visibility(False)
+                
 
-                                                    
+                                        
 
-                                            except Exception as e_up:
+                
 
-                                                status_label.set_text(f"检查失败: {e_up}")
+                                                                        # 获取日志
 
-                                            finally:
+                
 
-                                                check_btn.enable()
+                                                                        _, local_log = get_local_changelog()
+
+                
+
+                                                                        _, remote_log = await asyncio.get_event_loop().run_in_executor(None, get_remote_changelog)
+
+                
+
+                                                                        
+
+                
+
+                                                                        local_scroll.clear()
+
+                
+
+                                                                        with local_scroll:
+
+                
+
+                                                                            ui.markdown(local_log or "无日志")
+
+                
+
+                                                                        
+
+                
+
+                                                                        remote_scroll.clear()
+
+                
+
+                                                                        with remote_scroll:
+
+                
+
+                                                                            ui.markdown(remote_log or "无日志")
+
+                
+
+                                                                        
+
+                
+
+                                                                        changelog_container.set_visibility(True)
+
+                
+
+                                                                        status_label.set_text(msg)
+
+                
+
+                                                                        
+
+                
+
+                                                                        if has_up:
+
+                
+
+                                                                            info_label.set_text(f"检测到新版本: v{remote_v} (当前: v{local_v})")
+
+                
+
+                                                                            pull_btn.set_visibility(True)
+
+                
+
+                                                                        else:
+
+                
+
+                                                                            info_label.set_text(f"您已经是最新版本 (v{local_v})")
+
+                
+
+                                                                            pull_btn.set_visibility(False)
+
+                
+
+                                                                            
+
+                
+
+                                                                    except Exception as e_up:
+
+                
+
+                                                                        status_label.set_text(f"检查失败: {e_up}")
+
+                
+
+                                                                    finally:
+
+                
+
+                                                                        check_btn.enable()
+
+                
+
+                                        
 
                 
 
