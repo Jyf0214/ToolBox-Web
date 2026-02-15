@@ -1,6 +1,7 @@
 import ssl
 import logging
 import asyncio
+import traceback
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import text
@@ -30,6 +31,8 @@ async def test_connection_with_timeout(db_url, connect_args, timeout=10.0):
             await conn.execute(text("SELECT 1"))
         return temp_engine
     except Exception as e:
+        # 记录详细的连接失败原因
+        print(f"DEBUG: 连接测试内部错误: {type(e).__name__}")
         await temp_engine.dispose()
         raise e
 
@@ -37,17 +40,22 @@ async def test_connection_with_timeout(db_url, connect_args, timeout=10.0):
 async def create_engine_with_ssl_fallback():
     """
     创建数据库引擎，强制使用 SSL。
-    如果第一次握手因为证书不可信失败或超时，则在下一次尝试中信任该证书。
-    严禁使用非 SSL 连接。
     """
     global engine, AsyncSessionLocal
 
     db_url = settings.DATABASE_URL
+    
+    # 脱敏打印数据库主机
+    db_host = "Unknown"
+    try:
+        db_host = db_url.split('@')[-1].split('/')[0]
+    except:
+        pass
 
     # 1. 自动处理协议头
     if db_url.startswith("mysql://"):
         db_url = db_url.replace("mysql://", "mysql+asyncmy://", 1)
-        print("DEBUG: 自动修正数据库协议头为 mysql+asyncmy://")
+        print(f"DEBUG: 自动修正数据库协议头为 mysql+asyncmy://, 目标主机: {db_host}")
     elif not db_url.startswith("mysql+asyncmy://"):
         print(f"CRITICAL: 不支持的数据库协议: {db_url.split('://')[0]}")
         raise ValueError("Unsupported database dialect. Use mysql+asyncmy://")
@@ -58,8 +66,7 @@ async def create_engine_with_ssl_fallback():
         raise ValueError("Insecure database connections are strictly prohibited.")
 
     # 3. 第一次尝试：使用标准 SSL 验证
-    print("\n[1/2] 正在尝试标准 SSL 连接... (超时设定: 10s)")
-    print(f"目标节点: {db_url.split('@')[-1]}")
+    print(f"\n[1/2] 正在尝试标准 SSL 连接... (超时设定: 10s)")
 
     try:
         engine = await asyncio.wait_for(
@@ -67,11 +74,15 @@ async def create_engine_with_ssl_fallback():
         )
         print("SUCCESS: 标准 SSL 连接验证通过。")
     except (asyncio.TimeoutError, Exception) as e:
-        error_msg = str(e) or "Connection Handshake Timeout"
-        print(f"反馈: 第一次连接尝试未通过。原因: {error_msg}")
+        if isinstance(e, asyncio.TimeoutError):
+            print("反馈: 第一次连接尝试超时 (10s)。可能是网络连接问题或防火墙拦截。")
+        else:
+            print(f"反馈: 第一次连接尝试失败。错误类型: {type(e).__name__}")
+            print(f"详细错误信息: {e}")
+            # 不在这里打印完整堆栈，因为这是 fallback 逻辑的一部分
 
         # 4. 第二次尝试：TOFU 模式 (信任证书并强制 SSL 加密)
-        print("\n[2/2] 正在切换至 TOFU 模式 (信任证书并强制 SSL 加密)...")
+        print(f"\n[2/2] 正在切换至 TOFU 模式 (信任证书并强制 SSL 加密)... 目标: {db_host}")
 
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -83,7 +94,12 @@ async def create_engine_with_ssl_fallback():
             )
             print("SUCCESS: TOFU 加密连接建立成功。")
         except Exception as retry_e:
-            print(f"FATAL: 数据库所有加密连接尝试均失败: {retry_e}")
+            print(f"\n{'='*20} 数据库连接最终失败详情 {'='*20}")
+            print(f"异常类型: {type(retry_e).__name__}")
+            print(f"异常详情: {retry_e}")
+            print("\n完整错误堆栈:")
+            print(traceback.format_exc())
+            print(f"{'='*60}\n")
             raise retry_e
 
     # 5. 初始化 Session 工厂

@@ -61,7 +61,11 @@ async def startup_handler(state, modules_list, module_instances_dict):
             await conn.run_sync(Base.metadata.create_all)
         print("数据库初始化成功。")
     except Exception as e:
-        print(f"数据库连接失败 (已拒绝不安全连接): {e}")
+        import traceback
+        print(f"\nFATAL: 应用启动时数据库初始化失败:")
+        print(f"错误摘要: {e}")
+        print("完整错误堆栈:")
+        print(traceback.format_exc())
         state.db_connected = False
 
     if state.db_connected:
