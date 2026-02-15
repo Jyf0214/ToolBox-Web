@@ -54,11 +54,14 @@ async def create_engine_with_ssl_fallback():
 
     # 1. 自动处理协议头
     if db_url.startswith("mysql://"):
-        db_url = db_url.replace("mysql://", "mysql+asyncmy://", 1)
-        print(f"DEBUG: 自动修正数据库协议头为 mysql+asyncmy://, 目标主机: {db_host}")
-    elif not db_url.startswith("mysql+asyncmy://"):
+        db_url = db_url.replace("mysql://", "mysql+aiomysql://", 1)
+        print(f"DEBUG: 自动修正数据库协议头为 mysql+aiomysql://, 目标主机: {db_host}")
+    elif db_url.startswith("mysql+asyncmy://"):
+        db_url = db_url.replace("mysql+asyncmy://", "mysql+aiomysql://", 1)
+        print(f"DEBUG: 迁移数据库驱动: asyncmy -> aiomysql, 目标主机: {db_host}")
+    elif not db_url.startswith("mysql+aiomysql://"):
         print(f"CRITICAL: 不支持的数据库协议: {db_url.split('://')[0]}")
-        raise ValueError("Unsupported database dialect. Use mysql+asyncmy://")
+        raise ValueError("Unsupported database dialect. Use mysql+aiomysql://")
 
     # 2. 全局禁止不安全的连接参数
     if "ssl=disabled" in db_url.lower() or "ssl=false" in db_url.lower():

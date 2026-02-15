@@ -27,7 +27,7 @@ def get_version_from_changelog() -> str:
 class Settings(BaseSettings):
     # 数据库 URL 是唯一允许的必需环境变量
     DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", "mysql+asyncmy://user:password@localhost:3306/toolbox"
+        "DATABASE_URL", "mysql+aiomysql://user:password@localhost:3306/toolbox"
     )
 
     # 自动获取当前版本
