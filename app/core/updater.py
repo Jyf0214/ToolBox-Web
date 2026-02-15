@@ -1,6 +1,6 @@
 import os
 import subprocess
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 
 # 检查 git 是否可用
@@ -113,18 +113,25 @@ def check_critical_changes() -> List[str]:
     """检查核心文件（Dockerfile, requirements.txt等）是否有变动"""
     if not GIT_AVAILABLE:
         return []
-    
-    critical_files = ["Dockerfile", "Dockerfile.base", "requirements.txt", "scripts/entrypoint.sh"]
+
+    critical_files = [
+        "Dockerfile",
+        "Dockerfile.base",
+        "requirements.txt",
+        "scripts/entrypoint.sh",
+    ]
     changed_critical = []
-    
+
     # 确保 FETCH_HEAD 已存在（在 check_for_updates 之后运行）
-    success, output = run_git_command(["git", "diff", "--name-only", "HEAD", "FETCH_HEAD"])
+    success, output = run_git_command(
+        ["git", "diff", "--name-only", "HEAD", "FETCH_HEAD"]
+    )
     if success:
         changed_files = output.splitlines()
         for f in critical_files:
             if f in changed_files:
                 changed_critical.append(f)
-                
+
     return changed_critical
 
 
@@ -132,7 +139,7 @@ def get_remote_changelog() -> Tuple[bool, str]:
     """从远程获取 CHANGELOG.md 内容"""
     if not GIT_AVAILABLE:
         return False, "Git 命令不可用"
-    
+
     # 使用 git archive 或 temporary clone 比较麻烦，最快的是直接通过 raw 内容获取 (如果是 GitHub)
     # 或者使用 git show 远程分支的文件
     # 首先确保远程信息是最新的

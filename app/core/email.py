@@ -3,6 +3,7 @@ from email.mime.text import MIMEText
 from email.header import Header
 from app.core.settings_manager import get_setting
 
+
 async def send_email(to_email: str, subject: str, body: str) -> bool:
     """发送 SMTP 电子邮件"""
     enabled = await get_setting("smtp_enabled", "false")
@@ -20,10 +21,10 @@ async def send_email(to_email: str, subject: str, body: str) -> bool:
         return False
 
     try:
-        msg = MIMEText(body, 'plain', 'utf-8')
-        msg['From'] = from_addr
-        msg['To'] = to_email
-        msg['Subject'] = Header(subject, 'utf-8')
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["From"] = from_addr
+        msg["To"] = to_email
+        msg["Subject"] = Header(subject, "utf-8")
 
         # 默认使用 SSL
         server = smtplib.SMTP_SSL(host, port)

@@ -44,12 +44,12 @@ async def create_engine_with_ssl_fallback():
     global engine, AsyncSessionLocal
 
     db_url = settings.DATABASE_URL
-    
+
     # 脱敏打印数据库主机
     db_host = "Unknown"
     try:
-        db_host = db_url.split('@')[-1].split('/')[0]
-    except:
+        db_host = db_url.split("@")[-1].split("/")[0]
+    except Exception:
         pass
 
     # 1. 自动处理协议头
@@ -66,7 +66,7 @@ async def create_engine_with_ssl_fallback():
         raise ValueError("Insecure database connections are strictly prohibited.")
 
     # 3. 第一次尝试：使用标准 SSL 验证
-    print(f"\n[1/2] 正在尝试标准 SSL 连接... (超时设定: 10s)")
+    print("\n[1/2] 正在尝试标准 SSL 连接... (超时设定: 10s)")
 
     try:
         engine = await asyncio.wait_for(
@@ -82,7 +82,9 @@ async def create_engine_with_ssl_fallback():
             # 不在这里打印完整堆栈，因为这是 fallback 逻辑的一部分
 
         # 4. 第二次尝试：TOFU 模式 (信任证书并强制 SSL 加密)
-        print(f"\n[2/2] 正在切换至 TOFU 模式 (信任证书并强制 SSL 加密)... 目标: {db_host}")
+        print(
+            f"\n[2/2] 正在切换至 TOFU 模式 (信任证书并强制 SSL 加密)... 目标: {db_host}"
+        )
 
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -94,12 +96,12 @@ async def create_engine_with_ssl_fallback():
             )
             print("SUCCESS: TOFU 加密连接建立成功。")
         except Exception as retry_e:
-            print(f"\n{'='*20} 数据库连接最终失败详情 {'='*20}")
+            print(f"\n{'=' * 20} 数据库连接最终失败详情 {'=' * 20}")
             print(f"异常类型: {type(retry_e).__name__}")
             print(f"异常详情: {retry_e}")
             print("\n完整错误堆栈:")
             print(traceback.format_exc())
-            print(f"{'='*60}\n")
+            print(f"{'=' * 60}\n")
             raise retry_e
 
     # 5. 初始化 Session 工厂

@@ -40,7 +40,8 @@ class Tool(Base):
     is_enabled = Column(Boolean, default=True, nullable=False)
     is_guest_allowed = Column(Boolean, default=True, nullable=False)
     rate_limit_count = Column(Integer, default=0, nullable=False)  # 0 表示不限制
-    rate_limit_period = Column(Integer, default=60, nullable=False) # 默认 60 秒
+    rate_limit_period = Column(Integer, default=60, nullable=False)  # 默认 60 秒
+
 
 class TaskHistory(Base):
     __tablename__ = "task_history"
@@ -54,4 +55,4 @@ class TaskHistory(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
-    duration = Column(Integer) # 秒
+    duration = Column(Integer)  # 秒

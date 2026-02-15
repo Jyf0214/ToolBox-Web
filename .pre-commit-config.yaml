@@ -24,6 +24,13 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: meaningless-comments
+        name: Check for meaningless comments
+        entry: python3 scripts/check_comments.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.6
     hooks:

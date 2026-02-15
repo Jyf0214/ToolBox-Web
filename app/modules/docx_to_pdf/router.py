@@ -146,14 +146,14 @@ class DocxToPdfModule(BaseModule):
 
                     progress_bar.set_value(1.0)
                     status_label.set_text(f"上传完成: {file_name}")
-                    
+
                     content = e.file.read()
                     if hasattr(content, "__await__"):
                         state["content"] = await content
                     else:
                         state["content"] = content
 
-                    ui.notify(f"文件已就绪", color="positive")
+                    ui.notify("文件已就绪", color="positive")
                     convert_btn.enable()
                 except Exception as ex:
                     ui.notify("文件处理失败", color="negative")
@@ -176,25 +176,25 @@ class DocxToPdfModule(BaseModule):
 
                 from app.core.task_manager import global_task_manager
                 from app.core.auth import is_authenticated
-                
-                client_ip = app.storage.browser.get('id', 'Anonymous')
+
+                client_ip = app.storage.browser.get("id", "Anonymous")
 
                 state["processing"] = True
                 convert_btn.disable()
-                
+
                 # 1. 加入队列
                 task = await global_task_manager.add_task(
                     name="Word 转 PDF",
                     user_type="admin" if is_authenticated() else "guest",
                     ip=client_ip,
-                    filename=state["name"]
+                    filename=state["name"],
                 )
-                
+
                 status_label.set_visibility(True)
                 progress_bar.set_visibility(True)
                 progress_bar.props("color=orange")
                 result_card.set_visibility(False)
-                
+
                 # 异步模拟进度增长
                 async def simulate_fake_progress():
                     current = 0.05
@@ -205,7 +205,7 @@ class DocxToPdfModule(BaseModule):
                         progress_bar.set_value(current)
                         await asyncio.sleep(0.8)
 
-                progress_task = asyncio.create_task(simulate_fake_progress())
+                asyncio.create_task(simulate_fake_progress())
 
                 try:
                     # 2. 等待排队
@@ -213,11 +213,11 @@ class DocxToPdfModule(BaseModule):
                         waiting_ids = [t.id for t in global_task_manager.queue]
                         if task.id in waiting_ids:
                             pos = waiting_ids.index(task.id) + 1
-                            status_label.set_text(f"排队中: 前方有 {pos-1} 个任务...")
+                            status_label.set_text(f"排队中: 前方有 {pos - 1} 个任务...")
                             progress_bar.set_value(0.02)
                         else:
                             if task.id in global_task_manager.active_tasks:
-                                break 
+                                break
                         await global_task_manager.start_task(task.id)
                         break
 
@@ -254,7 +254,7 @@ class DocxToPdfModule(BaseModule):
                             self._add_blank_page_if_needed(output_path, True)
 
                         info = self._get_pdf_info(output_path)
-                        state["processing"] = False # 停止模拟进度
+                        state["processing"] = False  # 停止模拟进度
                         progress_bar.set_value(1.0)
                         progress_bar.props("color=green")
                         status_label.set_text("转换完成！")

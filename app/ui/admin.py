@@ -1,26 +1,17 @@
-import asyncio
-import secrets
-import string
-import time
-from datetime import datetime
 from nicegui import ui, app
 from fastapi import Request
-from sqlalchemy import select, update
 
-from app.core import database
-from app.models.models import Tool, User, Guest
-from app.core.config import settings
-from app.core.settings_manager import get_setting, set_setting
-from app.core.auth import is_authenticated, verify_password, get_password_hash
-from app.core.updater import check_for_updates, pull_updates
-
-# 存储重置数据
-reset_data = {}
-
-# 登录限流: {ip: {"count": int, "last_attempt": float}}
-login_attempts = {}
-MAX_ATTEMPTS = 5
-LOCKOUT_TIME = 300  # 5 分钟
+from app.core.auth import is_authenticated
+from app.ui.admin_parts.auth import render_login
+from app.ui.admin_parts.dashboard import render_dashboard, render_settings, render_smtp
+from app.ui.admin_parts.tools import render_tools
+from app.ui.admin_parts.system import (
+    render_system_status,
+    render_maintenance,
+    render_update,
+    render_queue,
+)
+from app.ui.admin_parts.logs import render_logs
 
 
 def create_admin_page(state, load_modules_func, sync_modules_func):
@@ -32,1225 +23,170 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
             ui.navigate.to("/setup")
             return
 
-        # 使用 refreshable 包装整个内容
         @ui.refreshable
         async def render_content():
             if not is_authenticated():
-                # --- 登录限流检查 ---
-                now = time.time()
-                if client_ip in login_attempts:
-                    attempts = login_attempts[client_ip]
-                    if attempts["count"] >= MAX_ATTEMPTS:
-                        if now - attempts["last_attempt"] < LOCKOUT_TIME:
-                            remaining = int(
-                                LOCKOUT_TIME - (now - attempts["last_attempt"])
-                            )
-                            with ui.card().classes(
-                                "absolute-center w-[90vw] max-w-sm shadow-xl p-8 text-center"
-                            ):
-                                ui.icon("lock", color="negative").classes("text-6xl mb-4")
-                                ui.label("访问受限").classes("text-h5 mb-2")
-                                ui.label(
-                                    f"由于多次尝试登录失败，您的 IP 已被临时锁定。请在 {remaining} 秒后再试。"
-                                ).classes("text-slate-500")
-                            return
-                        else:
-                            login_attempts[client_ip] = {"count": 0, "last_attempt": 0}
-
-                with ui.card().classes(
-                    "absolute-center w-[90vw] max-w-sm shadow-2xl p-0 overflow-hidden border-t-4 border-primary"
-                ):
-                    with ui.column().classes("p-8 w-full"):
-                        with ui.row().classes("w-full items-center justify-center mb-6"):
-                            ui.icon("admin_panel_settings", color="primary").classes(
-                                "text-4xl mr-2"
-                            )
-                            ui.label("管理控制台").classes("text-h5 font-bold")
-
-                        if not state.db_connected:
-                            with ui.row().classes(
-                                "w-full bg-red-50 p-3 rounded-lg mb-4 items-center"
-                            ):
-                                ui.icon("error", color="negative").classes("text-lg mr-2")
-                                ui.label("数据库未连接，登录暂不可用").classes(
-                                    "text-negative text-xs"
-                                )
-
-                        user_input = (
-                            ui.input("用户名")
-                            .classes("w-full mb-2")
-                            .props('outlined dense prepend-icon="person"')
-                        )
-                        pwd = (
-                            ui.input("密码", password=True)
-                            .classes("w-full mb-6")
-                            .props('outlined dense prepend-icon="lock"')
-                        )
-
-                        async def login():
-                            if not state.db_connected:
-                                ui.notify("无法登录：数据库连接失败", color="negative")
-                                return
-                            if not user_input.value or not pwd.value:
-                                ui.notify("请输入用户名和密码", color="warning")
-                                return
-
-                            if client_ip not in login_attempts:
-                                login_attempts[client_ip] = {"count": 0, "last_attempt": 0}
-
-                            try:
-                                async with database.AsyncSessionLocal() as session:
-                                    result = await session.execute(
-                                        select(User).where(
-                                            User.username == user_input.value,
-                                            User.is_admin,
-                                        )
-                                    )
-                                    admin = result.scalars().first()
-                                    if admin and verify_password(
-                                        pwd.value, admin.hashed_password
-                                    ):
-                                        login_attempts[client_ip] = {
-                                            "count": 0,
-                                            "last_attempt": 0,
-                                        }
-                                        # 更新验证状态
-                                        app.storage.user["authenticated"] = True
-                                        ui.notify("登录成功，欢迎回来", color="positive")
-                                        # 刷新当前页面内容
-                                        render_content.refresh()
-                                    else:
-                                        login_attempts[client_ip]["count"] += 1
-                                        login_attempts[client_ip]["last_attempt"] = (
-                                            time.time()
-                                        )
-                                        rem = MAX_ATTEMPTS - login_attempts[client_ip][
-                                            "count"
-                                        ]
-                                        if rem > 0:
-                                            ui.notify(
-                                                f"用户名或密码错误，还可以尝试 {rem} 次",
-                                                color="negative",
-                                            )
-                                        else:
-                                            ui.notify(
-                                                "尝试次数过多，IP 已被锁定", color="negative"
-                                            )
-                                            render_content.refresh()
-                            except Exception as e:
-                                ui.notify(f"登录过程出错: {e}", color="negative")
-
-                        pwd.on("keydown.enter", login)
-                        user_input.on("keydown.enter", login)
-                        ui.button("进入系统", on_click=login).classes(
-                            "w-full h-12 text-lg shadow-md"
-                        ).props("elevated")
-
-                        with ui.row().classes("w-full justify-center mt-4"):
-                            ui.button(
-                                "找回权限", on_click=lambda: reset_dialog.open()
-                            ).props("flat size=sm color=grey icon=help_outline")
+                await render_login(client_ip, state, render_content.refresh)
                 return
 
-            # --- 管理界面重构 (侧边栏布局) ---
+            # --- 侧边栏布局 ---
             with ui.header().classes(
                 "bg-slate-900 items-center justify-between px-4 py-2"
             ):
                 with ui.row().classes("items-center"):
-                    ui.button(
-                        on_click=lambda: left_drawer.toggle(), icon="menu"
-                    ).props("flat color=white").classes("sm:hidden")
-                    ui.label("ToolBox Admin").classes("text-xl font-bold text-white ml-2")
-                    ui.label(f"v{settings.VERSION}").classes(
-                        "text-xs text-slate-400 ml-2 hidden sm:block"
+                    ui.button(on_click=lambda: left_drawer.toggle(), icon="menu").props(
+                        "flat color=white"
+                    ).classes("sm:hidden")
+                    ui.label("ToolBox Admin").classes(
+                        "text-xl font-bold text-white ml-2"
                     )
-                with ui.row().classes("items-center gap-2"):
-                    ui.button(
-                        "退出",
-                        icon="logout",
-                        on_click=lambda: (
-                            app.storage.user.update({"authenticated": False}),
-                            ui.navigate.to("/admin"), # 退出时可以跳转回登录
-                            render_content.refresh()
-                        ),
-                    ).props("flat color=white size=sm").classes("rounded-lg")
 
-            with ui.left_drawer(value=True).classes("bg-slate-50 border-r") as left_drawer:
+                def logout():
+                    app.storage.user.update({"authenticated": False})
+                    render_content.refresh()
+
+                ui.button("退出", icon="logout", on_click=logout).props(
+                    "flat color=white size=sm"
+                )
+
+            with ui.left_drawer(value=True).classes(
+                "bg-slate-50 border-r"
+            ) as left_drawer:
                 with ui.column().classes("w-full p-4 gap-2"):
-                    nav_dashboard = ui.button("控制面板", icon="dashboard", on_click=lambda: switch_to("dashboard")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
-                    nav_settings = ui.button("站点设置", icon="settings", on_click=lambda: switch_to("settings")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
-                    nav_tools = ui.button("工具管理", icon="build", on_click=lambda: switch_to("tools")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
-                    nav_update = ui.button("系统更新", icon="system_update", on_click=lambda: switch_to("update")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
-                    nav_maintenance = ui.button("系统维护", icon="handyman", on_click=lambda: switch_to("maintenance")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
-                    nav_queue = ui.button("队列监控", icon="reorder", on_click=lambda: switch_to("queue")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
-                    nav_status = ui.button("系统状态", icon="analytics", on_click=lambda: switch_to("status")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
-                    nav_smtp = ui.button("邮件设置", icon="email", on_click=lambda: switch_to("smtp")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
-                    nav_logs = ui.button("访问日志", icon="list_alt", on_click=lambda: switch_to("logs")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
-                    
+                    nav_dashboard = (
+                        ui.button(
+                            "控制面板",
+                            icon="dashboard",
+                            on_click=lambda: switch_to("dashboard"),
+                        )
+                        .props("flat align=left")
+                        .classes("w-full rounded-lg")
+                    )
+                    nav_settings = (
+                        ui.button(
+                            "设置",
+                            icon="settings",
+                            on_click=lambda: switch_to("settings"),
+                        )
+                        .props("flat align=left")
+                        .classes("w-full rounded-lg")
+                    )
+                    nav_tools = (
+                        ui.button(
+                            "工具管理",
+                            icon="build",
+                            on_click=lambda: switch_to("tools"),
+                        )
+                        .props("flat align=left")
+                        .classes("w-full rounded-lg")
+                    )
+                    nav_update = (
+                        ui.button(
+                            "系统更新",
+                            icon="system_update",
+                            on_click=lambda: switch_to("update"),
+                        )
+                        .props("flat align=left")
+                        .classes("w-full rounded-lg")
+                    )
+                    nav_maintenance = (
+                        ui.button(
+                            "系统维护",
+                            icon="handyman",
+                            on_click=lambda: switch_to("maintenance"),
+                        )
+                        .props("flat align=left")
+                        .classes("w-full rounded-lg")
+                    )
+                    nav_queue = (
+                        ui.button(
+                            "队列监控",
+                            icon="reorder",
+                            on_click=lambda: switch_to("queue"),
+                        )
+                        .props("flat align=left")
+                        .classes("w-full rounded-lg")
+                    )
+                    nav_status = (
+                        ui.button(
+                            "运行状态",
+                            icon="analytics",
+                            on_click=lambda: switch_to("status"),
+                        )
+                        .props("flat align=left")
+                        .classes("w-full rounded-lg")
+                    )
+                    nav_logs = (
+                        ui.button(
+                            "访问日志",
+                            icon="list_alt",
+                            on_click=lambda: switch_to("logs"),
+                        )
+                        .props("flat align=left")
+                        .classes("w-full rounded-lg")
+                    )
+
                     ui.separator().classes("my-4")
-                    ui.button("回到首页", icon="home", on_click=lambda: ui.navigate.to("/")).props("flat align=left").classes("w-full rounded-lg text-slate-600")
+                    ui.button(
+                        "回到首页", icon="home", on_click=lambda: ui.navigate.to("/")
+                    ).props("flat align=left").classes(
+                        "w-full rounded-lg text-slate-600"
+                    )
 
             sections = {}
 
             def switch_to(name):
                 for k, v in sections.items():
                     v.set_visibility(k == name)
-                # Update nav styles
-                for btn, n in [(nav_dashboard, "dashboard"), (nav_settings, "settings"), (nav_tools, "tools"), (nav_update, "update"), (nav_maintenance, "maintenance"), (nav_queue, "queue"), (nav_status, "status"), (nav_smtp, "smtp"), (nav_logs, "logs")]:
-                    if n == name:
-                        btn.classes(add="bg-primary text-white", remove="text-slate-600")
-                    else:
-                        btn.classes(remove="bg-primary text-white", add="text-slate-600")
 
+                btns = {
+                    "dashboard": nav_dashboard,
+                    "settings": nav_settings,
+                    "tools": nav_tools,
+                    "update": nav_update,
+                    "maintenance": nav_maintenance,
+                    "queue": nav_queue,
+                    "status": nav_status,
+                    "logs": nav_logs,
+                }
+                for k, btn in btns.items():
+                    if k == name:
+                        btn.classes(
+                            add="bg-primary text-white", remove="text-slate-600"
+                        )
+                    else:
+                        btn.classes(
+                            remove="bg-primary text-white", add="text-slate-600"
+                        )
+
+            # --- 内容区域 ---
             with ui.column().classes("p-4 sm:p-8 w-full max-w-5xl mx-auto"):
-                # ... [此处保持原有的 Dashboard, Settings, Tools, Update, Logs 代码块不变] ...
-                # (为了简洁，我将在 new_string 中包含完整的逻辑块，但在 replace 时我会确保内容一致)
-                
-                # --- 控制面板 ---
                 with ui.column().classes("w-full") as sections["dashboard"]:
-                    ui.label("控制面板").classes("text-2xl font-bold mb-6")
-                    with ui.row().classes("w-full gap-4"):
-                        async def get_stats():
-                            async with database.AsyncSessionLocal() as session:
-                                tool_count = (await session.execute(select(Tool))).scalars().all()
-                                guest_count = (await session.execute(select(Guest))).scalars().all()
-                                return len(tool_count), len(guest_count)
-                        tc, gc = await get_stats() if state.db_connected else (0, 0)
-                        with ui.card().classes("flex-1 p-6 items-center shadow-sm border"):
-                            ui.label(str(tc)).classes("text-3xl font-bold text-primary")
-                            ui.label("总工具数").classes("text-slate-500 text-sm")
-                        with ui.card().classes("flex-1 p-6 items-center shadow-sm border"):
-                            ui.label(str(gc)).classes("text-3xl font-bold text-secondary")
-                            ui.label("历史访客").classes("text-slate-500 text-sm")
-                        with ui.card().classes("flex-1 p-6 items-center shadow-sm border"):
-                            ui.label("在线" if state.db_connected else "离线").classes(f"text-xl font-bold {'text-green-500' if state.db_connected else 'text-red-500'}")
-                            ui.label("数据库状态").classes("text-slate-500 text-sm")
+                    await render_dashboard(state)
 
-                # --- 站点设置 ---
                 with ui.column().classes("w-full hidden") as sections["settings"]:
-                    ui.label("站点设置").classes("text-2xl font-bold mb-6")
-                    with ui.card().classes("w-full p-6 shadow-sm border"):
-                        current_name = await get_setting("site_name", settings.SITE_NAME)
-                        name_input = ui.input("站点名称", value=current_name).classes("w-full").props("outlined")
-                        if not state.db_connected:
-                            name_input.disable()
-                        with ui.row().classes("w-full justify-end mt-6"):
-                            async def save_settings():
-                                await set_setting("site_name", name_input.value)
-                                ui.notify("设置已保存", color="positive")
-                            ui.button("保存修改", on_click=save_settings, icon="save").classes("px-6").disable() if not state.db_connected else ui.button("保存修改", on_click=save_settings, icon="save").classes("px-6")
+                    await render_settings(state)
+                    ui.separator().classes("my-8")
+                    await render_smtp()
 
-                # --- 工具管理 ---
                 with ui.column().classes("w-full hidden") as sections["tools"]:
-                    with ui.row().classes("w-full items-center justify-between mb-6"):
-                        ui.label("工具管理").classes("text-2xl font-bold")
-                        async def handle_refresh_tools():
-                            load_modules_func()
-                            await sync_modules_func()
-                            ui.notify("已重新扫描模块文件夹", color="info")
-                            refresh_tool_list.refresh()
-                        ui.button("刷新列表", icon="refresh", on_click=handle_refresh_tools).props("outline size=sm")
+                    await render_tools(state, load_modules_func, sync_modules_func)
 
-                    @ui.refreshable
-                    async def refresh_tool_list():
-                        if not state.db_connected:
-                            ui.label("数据库未连接").classes("text-negative")
-                            return
-                        async with database.AsyncSessionLocal() as session:
-                            result = await session.execute(select(Tool).order_by(Tool.id))
-                            tools = result.scalars().all()
-                            if not tools:
-                                ui.label("暂无工具，请点击右上角刷新").classes("text-slate-400 italic")
-                                return
-                            with ui.grid(columns=(1, 'md:2', 'lg:2')).classes("w-full gap-4"):
-                                                            for t in tools:
-                                                                with ui.card().classes("p-4 shadow-sm border hover:shadow-md transition-shadow"):
-                                                                    with ui.row().classes("w-full items-start justify-between"):
-                                                                        with ui.column().classes("flex-1"):
-                                                                            with ui.row().classes("items-center"):
-                                                                                ui.label(t.display_name).classes("text-lg font-bold truncate")
-                                                                                if t.rate_limit_count > 0:
-                                                                                    ui.badge(f"{t.rate_limit_count}/{t.rate_limit_period}s", color="orange").props("outline")
-                                                                            ui.label(t.name).classes("text-xs text-slate-400 font-mono")
-                                                                        
-                                                                        async def toggle_tool(tool_name, field, value):
-                                                                            async with database.AsyncSessionLocal() as session_int:
-                                                                                await session_int.execute(
-                                                                                    update(Tool).where(Tool.name == tool_name).values({field: value})
-                                                                                )
-                                                                                await session_int.commit()
-                                                                            ui.notify(f"已更新 {tool_name}")
-                                
-                                                                        with ui.column().classes("items-end gap-1"):
-                                                                            ui.switch("启用", value=t.is_enabled, 
-                                                                                     on_change=lambda e, name=t.name: toggle_tool(name, "is_enabled", e.value)).props("dense")
-                                                                            ui.switch("游客", value=t.is_guest_allowed, 
-                                                                                     on_change=lambda e, name=t.name: toggle_tool(name, "is_guest_allowed", e.value)).props("dense")
-                                                                            
-                                                                            async def open_settings(tool_obj):
-                                                                                with ui.dialog() as settings_dialog, ui.card().classes("p-6 w-full max-w-sm"):
-                                                                                    ui.label(f"配置 - {tool_obj.display_name}").classes("text-h6 mb-4")
-                                                                                    limit_input = ui.number("速率限制 (次数)", value=tool_obj.rate_limit_count, format="%.0f", help="0 表示不限制").classes("w-full")
-                                                                                    period_input = ui.number("统计周期 (秒)", value=tool_obj.rate_limit_period, format="%.0f").classes("w-full")
-                                                                                    
-                                                                                    with ui.row().classes("w-full justify-end mt-6 gap-2"):
-                                                                                        ui.button("取消", on_click=settings_dialog.close).props("flat")
-                                                                                        async def save_tool_settings():
-                                                                                            async with database.AsyncSessionLocal() as session_save:
-                                                                                                await session_save.execute(
-                                                                                                    update(Tool).where(Tool.name == tool_obj.name).values({
-                                                                                                        "rate_limit_count": int(limit_input.value or 0),
-                                                                                                        "rate_limit_period": int(period_input.value or 60)
-                                                                                                    })
-                                                                                                )
-                                                                                                await session_save.commit()
-                                                                                            ui.notify("工具配置已保存")
-                                                                                            settings_dialog.close()
-                                                                                            refresh_tool_list.refresh()
-                                                                                        ui.button("保存", on_click=save_tool_settings).props("elevated")
-                                                                                settings_dialog.open()
-                                
-                                                                            ui.button(icon="settings", on_click=lambda t_obj=t: open_settings(t_obj)).props("flat dense size=sm color=grey")
-                                
-                    await refresh_tool_list()
+                with ui.column().classes("w-full hidden") as sections["update"]:
+                    await render_update()
 
-                            # --- 系统更新 ---
+                with ui.column().classes("w-full hidden") as sections["maintenance"]:
+                    await render_maintenance(state)
 
-                            with ui.column().classes("w-full hidden") as sections["update"]:
+                with ui.column().classes("w-full hidden") as sections["queue"]:
+                    render_queue()
 
-                                ui.label("系统更新").classes("text-2xl font-bold mb-6")
+                with ui.column().classes("w-full hidden") as sections["status"]:
+                    await render_system_status(state)
 
-                                with ui.card().classes("w-full p-8 shadow-sm border"):
+                with ui.column().classes("w-full hidden") as sections["logs"]:
+                    await render_logs(state)
 
-                                    with ui.column().classes("w-full items-center text-center"):
+            switch_to("dashboard")
 
-                                        ui.icon("system_update_alt", color="primary").classes("text-6xl mb-4")
-
-                                        status_label = ui.label("检查系统是否有可用更新").classes("text-lg mb-2")
-
-                                        info_label = ui.label(f"当前版本: v{settings.VERSION}").classes("text-sm text-slate-500 mb-6")
-
-                                    
-
-                                                        # 日志对比区域
-
-                                    
-
-                                                        changelog_container = ui.column().classes("w-full mt-4 hidden")
-
-                                    
-
-                                                        critical_warning = ui.card().classes("w-full mb-4 bg-orange-50 border-orange-200 border hidden")
-
-                                    
-
-                                                        with critical_warning:
-
-                                    
-
-                                                            with ui.row().classes("items-center p-4"):
-
-                                    
-
-                                                                ui.icon("warning", color="orange", size="md").classes("mr-4")
-
-                                    
-
-                                                                with ui.column():
-
-                                    
-
-                                                                    ui.label("环境依赖变动提醒").classes("font-bold text-orange-800")
-
-                                    
-
-                                                                    critical_files_label = ui.label("").classes("text-xs text-orange-700")
-
-                                    
-
-                                                                    ui.label("建议在更新后重新构建或拉取最新的 Docker 镜像以确保系统稳定性。").classes("text-xs text-orange-600 mt-1")
-
-                                    
-
-                                    
-
-                                    
-
-                                                        with changelog_container:
-
-                                    
-
-                                                            ui.separator().classes("mb-4")
-
-                                    
-
-                                                            # ... 其余代码不变
-
-                                    
-
-                                    
-
-                                        ui.label("更新日志对比").classes("text-sm font-bold text-slate-700 mb-2")
-
-                                        with ui.row().classes("w-full gap-4"):
-
-                                            with ui.column().classes("flex-1"):
-
-                                                ui.label("本地 (当前)").classes("text-xs text-slate-400")
-
-                                                local_scroll = ui.scroll_area().classes("h-64 border rounded p-2 bg-slate-50 text-xs")
-
-                                            with ui.column().classes("flex-1"):
-
-                                                ui.label("远程 (最新)").classes("text-xs text-primary")
-
-                                                remote_scroll = ui.scroll_area().classes("h-64 border rounded p-2 bg-blue-50 text-xs")
-
-                
-
-                                    with ui.row().classes("w-full justify-center gap-4 mt-8"):
-
-                                        check_btn = ui.button("检查更新", icon="search").props("elevated")
-
-                                        pull_btn = ui.button("立即开始更新", icon="cloud_download").props("color=positive elevated").classes("hidden")
-
-                
-
-                                                                async def check_update():
-
-                
-
-                                                                    check_btn.disable()
-
-                
-
-                                                                    status_label.set_text("正在同步远程仓库...")
-
-                
-
-                                                                    try:
-
-                
-
-                                                                        from app.core.updater import get_local_changelog, get_remote_changelog, check_critical_changes
-
-                
-
-                                                                        has_up, local_v, remote_v, msg = await asyncio.get_event_loop().run_in_executor(None, check_for_updates)
-
-                
-
-                                                                        
-
-                
-
-                                                                        # 检查核心文件变动
-
-                
-
-                                                                        critical_changes = await asyncio.get_event_loop().run_in_executor(None, check_critical_changes)
-
-                
-
-                                                                        if critical_changes:
-
-                
-
-                                                                            critical_warning.set_visibility(True)
-
-                
-
-                                                                            critical_files_label.set_text(f"检测到核心文件变动: {', '.join(critical_changes)}")
-
-                
-
-                                                                        else:
-
-                
-
-                                                                            critical_warning.set_visibility(False)
-
-                
-
-                                        
-
-                
-
-                                                                        # 获取日志
-
-                
-
-                                                                        _, local_log = get_local_changelog()
-
-                
-
-                                                                        _, remote_log = await asyncio.get_event_loop().run_in_executor(None, get_remote_changelog)
-
-                
-
-                                                                        
-
-                
-
-                                                                        local_scroll.clear()
-
-                
-
-                                                                        with local_scroll:
-
-                
-
-                                                                            ui.markdown(local_log or "无日志")
-
-                
-
-                                                                        
-
-                
-
-                                                                        remote_scroll.clear()
-
-                
-
-                                                                        with remote_scroll:
-
-                
-
-                                                                            ui.markdown(remote_log or "无日志")
-
-                
-
-                                                                        
-
-                
-
-                                                                        changelog_container.set_visibility(True)
-
-                
-
-                                                                        status_label.set_text(msg)
-
-                
-
-                                                                        
-
-                
-
-                                                                        if has_up:
-
-                
-
-                                                                            info_label.set_text(f"检测到新版本: v{remote_v} (当前: v{local_v})")
-
-                
-
-                                                                            pull_btn.set_visibility(True)
-
-                
-
-                                                                        else:
-
-                
-
-                                                                            info_label.set_text(f"您已经是最新版本 (v{local_v})")
-
-                
-
-                                                                            pull_btn.set_visibility(False)
-
-                
-
-                                                                            
-
-                
-
-                                                                    except Exception as e_up:
-
-                
-
-                                                                        status_label.set_text(f"检查失败: {e_up}")
-
-                
-
-                                                                    finally:
-
-                
-
-                                                                        check_btn.enable()
-
-                
-
-                                        
-
-                
-
-                                        async def confirm_update():
-
-                                            with ui.dialog() as confirm_dialog, ui.card().classes("p-6"):
-
-                                                ui.label("确认更新系统？").classes("text-h6 mb-4")
-
-                                                ui.label("系统将拉取最新代码并可能需要手动重启。更新过程中请勿切断电源。").classes("text-slate-500 mb-6")
-
-                                                with ui.row().classes("w-full justify-end gap-2"):
-
-                                                    ui.button("取消", on_click=confirm_dialog.close).props("flat")
-
-                                                    ui.button("确认更新", on_click=lambda: (confirm_dialog.close(), do_pull_update())).props("elevated color=positive")
-
-                                            confirm_dialog.open()
-
-                
-
-                                        async def do_pull_update():
-
-                                            pull_btn.disable()
-
-                                            check_btn.disable()
-
-                                            status_label.set_text("正在下载并应用更新...")
-
-                                            try:
-
-                                                success, msg = await asyncio.get_event_loop().run_in_executor(None, pull_updates)
-
-                                                status_label.set_text(msg)
-
-                                                if success:
-
-                                                    ui.notify("系统更新成功！", color="positive", duration=None)
-
-                                                    ui.label("更新已完成。请通过控制台重启应用以加载新版本。").classes("text-positive font-bold mt-4")
-
-                                            except Exception as e_pull:
-
-                                                status_label.set_text(f"更新失败: {e_pull}")
-
-                                            finally:
-
-                                                pull_btn.enable()
-
-                                                check_btn.enable()
-
-                
-
-                                        check_btn.on_click(check_update)
-
-                                        pull_btn.on_click(confirm_update)
-
-                
-
-                            # --- 系统维护 ---
-            with ui.column().classes("w-full hidden") as sections["maintenance"]:
-                ui.label("系统维护").classes("text-2xl font-bold mb-6")
-                
-                with ui.grid(columns=(1, 'md:2')).classes("w-full gap-6"):
-                    # 数据库清理卡片
-                    with ui.card().classes("p-6 shadow-sm border"):
-                        with ui.row().classes("items-center mb-4"):
-                            ui.icon("delete_sweep", color="warning", size="md").classes("mr-2")
-                            ui.label("数据库清理").classes("text-xl font-bold")
-                        ui.label("识别并删除数据库中不再使用的孤儿表。").classes("text-sm text-slate-500 mb-6")
-                        
-                        async def scan_and_clean_db():
-                            if not state.db_connected: return
-                            try:
-                                from sqlalchemy import inspect, text
-                                async with database.engine.connect() as conn:
-                                    # 获取当前数据库中所有的表名
-                                    def get_tables(connection):
-                                        return inspect(connection).get_table_names()
-                                    
-                                    db_tables = await conn.run_sync(get_tables)
-                                    # 获取模型中定义的表名
-                                    model_tables = set(database.Base.metadata.tables.keys())
-                                    
-                                    orphan_tables = [t for t in db_tables if t not in model_tables]
-                                    
-                                    if not orphan_tables:
-                                        ui.notify("未发现冗余表，数据库很干净。", color="positive")
-                                        return
-                                    
-                                    with ui.dialog() as clean_confirm, ui.card().classes("p-6"):
-                                        ui.label("发现冗余表").classes("text-h6 mb-2")
-                                        ui.label(f"以下表不再被系统使用，确认删除吗？").classes("text-sm text-slate-500 mb-4")
-                                        with ui.column().classes("bg-slate-100 p-2 rounded mb-6 w-full"):
-                                            for ot in orphan_tables:
-                                                ui.label(f"• {ot}").classes("text-xs font-mono text-negative")
-                                        
-                                        with ui.row().classes("w-full justify-end gap-2"):
-                                            ui.button("取消", on_click=clean_confirm.close).props("flat")
-                                            async def do_clean():
-                                                async with database.engine.begin() as conn_del:
-                                                    for ot in orphan_tables:
-                                                        await conn_del.execute(text(f"DROP TABLE IF EXISTS `{ot}`"))
-                                                ui.notify(f"已清理 {len(orphan_tables)} 个冗余表", color="positive")
-                                                clean_confirm.close()
-                                            ui.button("确认删除", on_click=do_clean).props("elevated color=negative")
-                                    clean_confirm.open()
-                            except Exception as e_clean:
-                                ui.notify(f"扫描失败: {e_clean}", color="negative")
-
-                        ui.button("扫描冗余表", icon="search", on_click=scan_and_clean_db).classes("w-full").props("outline")
-
-                    # 日志清理卡片
-                    with ui.card().classes("p-6 shadow-sm border"):
-                        with ui.row().classes("items-center mb-4"):
-                            ui.icon("history_toggle_off", color="info", size="md").classes("mr-2")
-                            ui.label("日志管理").classes("text-xl font-bold")
-                        ui.label("清空访客记录。这不会影响管理员账号或工具设置。").classes("text-sm text-slate-500 mb-6")
-                        
-                        async def clear_logs_action():
-                            with ui.dialog() as log_confirm, ui.card().classes("p-6"):
-                                ui.label("确认清空访问日志？").classes("text-h6 mb-2")
-                                ui.label("此操作不可恢复。").classes("text-sm text-slate-500 mb-6")
-                                with ui.row().classes("w-full justify-end gap-2"):
-                                    ui.button("取消", on_click=log_confirm.close).props("flat")
-                                    async def do_clear_logs():
-                                        async with database.AsyncSessionLocal() as session:
-                                            from sqlalchemy import delete
-                                            await session.execute(delete(Guest))
-                                            await session.commit()
-                                        ui.notify("访问日志已清空", color="positive")
-                                        log_confirm.close()
-                                    ui.button("确认清空", on_click=do_clear_logs).props("elevated color=negative")
-                            log_confirm.open()
-
-                        ui.button("清空访客日志", icon="delete", on_click=clear_logs_action).classes("w-full").props("outline color=negative")
-
-            # --- 队列监控 ---
-            with ui.column().classes("w-full hidden") as sections["queue"]:
-                from app.core.task_manager import global_task_manager
-                ui.label("队列监控").classes("text-2xl font-bold mb-6")
-                
-                with ui.card().classes("w-full p-6 mb-6 shadow-sm border"):
-                    ui.label("并发控制").classes("text-lg font-bold mb-4")
-                    with ui.row().classes("items-center gap-4"):
-                        ui.label("全局最大同时处理任务数:")
-                        n_input = ui.number(value=global_task_manager.max_concurrent_tasks, min=1, max=10).props("outlined dense")
-                        def update_max():
-                            global_task_manager.max_concurrent_tasks = int(n_input.value)
-                            ui.notify(f"已更新最大并发数为 {n_input.value}")
-                        ui.button("保存", on_click=update_max).props("flat")
-
-                @ui.refreshable
-                def refresh_admin_queue():
-                    with ui.card().classes("w-full p-6 shadow-sm border"):
-                        ui.label("实时队列").classes("text-lg font-bold mb-4")
-                        
-                        active = list(global_task_manager.active_tasks.values())
-                        waiting = global_task_manager.queue
-                        
-                        if not active and not waiting:
-                            ui.label("当前无活跃任务").classes("text-slate-400 italic")
-                            return
-
-                        with ui.column().classes("w-full gap-4"):
-                            if active:
-                                ui.label(f"正在处理 ({len(active)})").classes("text-sm font-bold text-green-600")
-                                for t in active:
-                                    with ui.row().classes("w-full p-3 bg-green-50 rounded-lg items-center justify-between"):
-                                        with ui.column():
-                                            ui.label(t.name).classes("font-bold")
-                                            ui.label(f"ID: {t.id} | IP: {t.ip}").classes("text-[10px] text-slate-500 font-mono")
-                                        with ui.column().classes("items-end"):
-                                            ui.label(t.filename or "无文件").classes("text-xs text-slate-600 truncate max-w-[200px]")
-                                            ui.label("正在执行...").classes("text-[10px] text-green-500 animate-pulse")
-                            
-                            if waiting:
-                                ui.label(f"等待中 ({len(waiting)})").classes("text-sm font-bold text-orange-600")
-                                for i, t in enumerate(waiting):
-                                    with ui.row().classes("w-full p-3 bg-slate-50 rounded-lg items-center justify-between"):
-                                        with ui.row().classes("items-center"):
-                                            ui.label(str(i+1)).classes("bg-orange-200 text-orange-800 rounded-full w-5 h-5 text-center text-[10px] leading-5 mr-3")
-                                            with ui.column():
-                                                ui.label(t.name).classes("font-bold text-slate-700")
-                                                ui.label(f"ID: {t.id} | IP: {t.ip}").classes("text-[10px] text-slate-500 font-mono")
-                                        ui.label(t.filename or "无文件").classes("text-xs text-slate-400")
-
-                refresh_admin_queue()
-                ui.timer(2.0, refresh_admin_queue.refresh)
-
-            # --- 系统状态 ---
-            with ui.column().classes("w-full hidden") as sections["status"]:
-                ui.label("系统状态").classes("text-2xl font-bold mb-6")
-                
-                with ui.grid(columns=(1, 'md:2', 'lg:3')).classes("w-full gap-6 mb-6"):
-                    # CPU Usage Card
-                    with ui.card().classes("p-6 shadow-sm border"):
-                        ui.label("CPU 使用率").classes("text-lg font-bold mb-2")
-                        cpu_usage_percent_label = ui.label("N/A").classes("text-4xl font-bold text-primary")
-                        ui.label("%").classes("text-lg self-center")
-
-                    # Memory Usage Card
-                    with ui.card().classes("p-6 shadow-sm border"):
-                        ui.label("内存占用").classes("text-lg font-bold mb-2")
-                        mem_usage_percent_label = ui.label("N/A").classes("text-4xl font-bold text-secondary")
-                        mem_total_label = ui.label("Total: N/A GB").classes("text-xs text-slate-500")
-                        mem_used_label = ui.label("Used: N/A GB").classes("text-xs text-slate-500")
-
-                    # Task Queue Status Card
-                    with ui.card().classes("p-6 shadow-sm border"):
-                        ui.label("任务队列状态").classes("text-lg font-bold mb-2")
-                        waiting_label = ui.label("等待中: N/A").classes("text-base")
-                        active_label = ui.label("处理中: N/A").classes("text-base")
-                        max_concurrent_label = ui.label("最大并发: N/A").classes("text-base")
-
-                # Real-time Updates for System Stats and Queue
-                from app.core.task_manager import global_task_manager
-                async def update_system_info():
-                    stats = global_task_manager.get_system_stats()
-                    cpu_usage_percent_label.set_text(f"{stats['cpu_percent']:.1f}" if stats['cpu_percent'] is not None else "N/A")
-                    mem_usage_percent_label.set_text(f"{stats['memory_percent']:.1f}" if stats['memory_percent'] is not None else "N/A")
-                    mem_total_label.set_text(f"Total: {stats['memory_total']} GB" if stats['memory_total'] is not None else "Total: N/A GB")
-                    mem_used_label.set_text(f"Used: {stats['memory_used']} GB" if stats['memory_used'] is not None else "Used: N/A GB")
-
-                    queue_status = global_task_manager.get_status()
-                    waiting_label.set_text(f"等待中: {queue_status['waiting_count']}")
-                    active_label.set_text(f"处理中: {queue_status['active_count']} / {queue_status['max_concurrent']}")
-                    max_concurrent_label.set_text(f"最大并发: {queue_status['max_concurrent']}")
-
-                # Timer for updates
-                ui.timer(2.0, update_system_info)
-                await update_system_info() # Initial load
-
-                # Historical Tasks
-                ui.separator(classes="my-8")
-                ui.label("历史任务记录").classes("text-xl font-bold mb-4")
-                
-                if not state.db_connected:
-                    ui.label("数据库未连接，无法加载历史任务。").classes("text-negative")
-                else:
-                    @ui.refreshable
-                    async def task_history_table():
-                        async with database.AsyncSessionLocal() as session:
-                            from sqlalchemy import select, desc
-                            result = await session.execute(select(TaskHistory).order_by(desc(TaskHistory.completed_at)).limit(50))
-                            tasks = result.scalars().all()
-                            
-                            if not tasks:
-                                ui.label("暂无历史任务记录。").classes("text-slate-400 italic")
-                                return
-
-                            with ui.card().classes("w-full p-0 overflow-hidden border shadow-sm"):
-                                with ui.column().classes("w-full divide-y"):
-                                    for task in tasks:
-                                        with ui.row().classes("w-full p-4 items-center justify-between hover:bg-slate-50 transition-colors"):
-                                            with ui.column().classes("gap-1 flex-1"):
-                                                ui.label(task.task_name or "Unnamed Task").classes("font-bold text-slate-700")
-                                                ui.label(f"ID: {task.task_id[:8]} | IP: {task.ip_address or 'N/A'} | User: {task.user_type}").classes("text-[10px] text-slate-500 font-mono")
-                                                if task.filename:
-                                                    ui.label(f"File: {task.filename}").classes("text-xs text-slate-600 truncate max-w-[300px]")
-                                            with ui.column().classes("items-center"):
-                                                status_color = "positive" if task.status == "completed" else ("negative" if task.status == "failed" else "info")
-                                                status_icon = "check_circle" if task.status == "completed" else ("error" if task.status == "failed" else "hourglass_bottom")
-                                                ui.icon(status_icon, color=status_color).classes("mb-1")
-                                                ui.label(task.status.capitalize()).classes(f"text-xs font-bold text-{status_color}")
-                                                ui.label(f"Duration: {task.duration}s" if task.duration is not None else "").classes("text-[10px] text-slate-400")
-                                            with ui.column().classes("items-end"):
-                                                ui.label(task.completed_at.strftime('%Y-%m-%d')).classes("text-xs font-bold text-slate-600")
-                                                ui.label(task.completed_at.strftime('%H:%M:%S')).classes("text-[10px] text-slate-400")
-                    
-                    await task_history_table()
-                    ui.timer(5.0, task_history_table.refresh) # Refresh history less frequently
-
-            # --- 邮件设置 ---
-            with ui.column().classes("w-full hidden") as sections["smtp"]:
-                ui.label("邮件通知设置").classes("text-2xl font-bold mb-6")
-                ui.markdown("配置 SMTP 服务器以接收通知。").classes("text-sm text-slate-500 mb-6")
-                
-                smtp_enabled = await get_setting("smtp_enabled", "false")
-                smtp_host = await get_setting("smtp_host")
-                smtp_port = await get_setting("smtp_port", "465")
-                smtp_user = await get_setting("smtp_user")
-                smtp_password = await get_setting("smtp_password")
-                smtp_from = await get_setting("smtp_from", smtp_user)
-
-                enable_switch = ui.switch("启用邮件通知", value=(smtp_enabled.lower() == "true"))
-                host_input = ui.input("SMTP 服务器主机", value=smtp_host).classes("w-full").props("outlined dense")
-                port_input = ui.number("端口", value=int(smtp_port) if smtp_port else 465, format="%.0f").classes("w-full").props("outlined dense min=1 max=65535")
-                user_input = ui.input("SMTP 用户名", value=smtp_user).classes("w-full").props("outlined dense")
-                pwd_input = ui.input("SMTP 密码", password=True, password_toggle_button=True).classes("w-full").props("outlined dense")
-                from_input = ui.input("发件人地址", value=smtp_from).classes("w-full").props("outlined dense")
-                
-                async def save_smtp_settings():
-                    await set_setting("smtp_enabled", str(enable_switch.value))
-                    await set_setting("smtp_host", host_input.value)
-                    await set_setting("smtp_port", str(port_input.value))
-                    await set_setting("smtp_user", user_input.value)
-                    await set_setting("smtp_password", pwd_input.value)
-                    await set_setting("smtp_from", from_input.value)
-                    ui.notify("SMTP 设置已保存", color="positive")
-
-                ui.button("保存设置", on_click=save_smtp_settings, icon="save").classes("mt-6 px-6")
-                
-                # Test Email Button
-                async def send_test_email():
-                    if not enable_switch.value:
-                        ui.notify("邮件通知未启用", color="warning")
-                        return
-                    
-                    test_email_addr = await get_setting("smtp_user") # Test to the SMTP user's inbox
-                    if not test_email_addr:
-                         ui.notify("SMTP 用户名未设置，无法发送测试邮件", color="warning")
-                         return
-
-                    subject = "ToolBox SMTP 测试邮件"
-                    body = "这是一封来自 ToolBox 的 SMTP 测试邮件，用于验证配置是否正确。"
-                    
-                    sent = await send_email(test_email_addr, subject, body)
-                    if sent:
-                        ui.notify(f"测试邮件已发送到 {test_email_addr}", color="positive")
-                    else:
-                        ui.notify(f"发送测试邮件失败，请检查 SMTP 配置和日志。", color="negative")
-                
-                ui.button("发送测试邮件", on_click=send_test_email, icon="send").classes("mt-2 px-4").props("outline")
-
-
-            # --- 访问日志 ---
-
-                
-
-                            with ui.column().classes("w-full hidden") as sections["logs"]:
-
-                
-
-                                ui.label("最近访客").classes("text-2xl font-bold mb-6")
-
-                
-
-                                if state.db_connected:
-
-                
-
-                                    async with database.AsyncSessionLocal() as session:
-
-                
-
-                                        res = await session.execute(select(Guest).order_by(Guest.last_seen.desc()).limit(30))
-
-                
-
-                                        guests = res.scalars().all()
-
-                
-
-                                        
-
-                
-
-                                        if not guests:
-
-                
-
-                                            ui.label("尚无访问记录").classes("text-slate-400 italic")
-
-                
-
-                                        else:
-
-                
-
-                                            with ui.card().classes("w-full p-0 overflow-hidden border shadow-sm"):
-
-                
-
-                                                with ui.column().classes("w-full divide-y"):
-
-                
-
-                                                    for g in guests:
-
-                
-
-                                                        with ui.row().classes("w-full p-4 items-center justify-between hover:bg-slate-50 transition-colors"):
-
-                
-
-                                                            with ui.column().classes("gap-1"):
-
-                
-
-                                                                with ui.row().classes("items-center"):
-
-                
-
-                                                                    ui.icon("public", color="primary", size="xs").classes("mr-2")
-
-                
-
-                                                                    ui.label(g.ip_address).classes("font-mono font-bold text-slate-700")
-
-                
-
-                                                                
-
-                
-
-                                                                # 解析简单的 UA 信息
-
-                
-
-                                                                ua = "Unknown"
-
-                
-
-                                                                if g.metadata_json and isinstance(g.metadata_json, dict):
-
-                
-
-                                                                    ua = g.metadata_json.get("user_agent", "Unknown")
-
-                
-
-                                                                
-
-                
-
-                                                                def parse_ua(ua_str):
-
-                
-
-                                                                    if not ua_str or ua_str == "Unknown": return "未知设备"
-
-                
-
-                                                                    res_browser = "Other"
-
-                
-
-                                                                    if "Chrome" in ua_str: res_browser = "Chrome"
-
-                
-
-                                                                    if "Firefox" in ua_str: res_browser = "Firefox"
-
-                
-
-                                                                    if "Safari" in ua_str and "Chrome" not in ua_str: res_browser = "Safari"
-
-                
-
-                                                                    if "Edge" in ua_str: res_browser = "Edge"
-
-                
-
-                                                                    
-
-                
-
-                                                                    res_os = "Unknown OS"
-
-                
-
-                                                                    if "Windows" in ua_str: res_os = "Windows"
-
-                
-
-                                                                    if "Macintosh" in ua_str: res_os = "macOS"
-
-                
-
-                                                                    if "Android" in ua_str: res_os = "Android"
-
-                
-
-                                                                    if "iPhone" in ua_str: res_os = "iOS"
-
-                
-
-                                                                    if "Linux" in ua_str and "Android" not in ua_str: res_os = "Linux"
-
-                
-
-                                                                    
-
-                
-
-                                                                    return f"{res_browser} on {res_os}"
-
-                
-
-                
-
-                
-
-                                                                with ui.row().classes("items-center text-xs text-slate-500"):
-
-                
-
-                                                                    ui.icon("devices", size="xs").classes("mr-1")
-
-                
-
-                                                                    summary = ui.label(parse_ua(ua))
-
-                
-
-                                                                    with ui.tooltip(ua):
-
-                
-
-                                                                        ui.label(ua).classes("text-xs")
-
-                
-
-                                                            
-
-                
-
-                                                            with ui.column().classes("items-end"):
-
-                
-
-                                                                ui.label(g.last_seen.strftime('%Y-%m-%d')).classes("text-xs font-bold text-slate-600")
-
-                
-
-                                                                ui.label(g.last_seen.strftime('%H:%M:%S')).classes("text-[10px] text-slate-400")
-
-                
-
-                                else:
-
-                
-
-                                    ui.label("数据库未连接").classes("text-negative")
-
-                
-
-                
-
-                switch_to("dashboard")
-
-        # 初始调用
         await render_content()
-
-        # --- 重置密码对话框 (全局单例) ---
-        with ui.dialog() as reset_dialog, ui.card().classes("w-full max-w-md"):
-            with ui.column().classes("p-6 w-full"):
-                ui.label("安全验证与维护").classes("text-h6 mb-2")
-                status_msg = ui.label("请输入管理员用户名以开始验证").classes(
-                    "text-sm text-slate-500 mb-6"
-                )
-
-                with ui.column().classes("w-full gap-4"):
-                    r_user_input = ui.input("管理员用户名").classes("w-full").props('outlined dense')
-                    r_code_input = ui.input("重置码").classes("w-full").props('outlined dense')
-                    r_code_input.set_visibility(False)
-                    
-                    new_pwd_input = ui.input("新密码", password=True).classes("w-full").props('outlined dense')
-                    new_pwd_input.set_visibility(False)
-
-                    def generate_random_code():
-                        alphabet = (
-                            string.ascii_letters + string.digits + "!@#$%^&*"
-                        )
-                        return "".join(
-                            secrets.choice(alphabet) for _ in range(32)
-                        )
-
-                    async def request_code():
-                        if not r_user_input.value:
-                            ui.notify("请输入用户名", color="warning")
-                            return
-                        now_req = time.time()
-                        ip_info = reset_data.get(client_ip, {"last_request": 0})
-                        if now_req - ip_info["last_request"] < 60:
-                            ui.notify("请求太频繁，请稍后再试", color="warning")
-                            return
-                        code = generate_random_code()
-                        reset_data[client_ip] = {
-                            "code": code,
-                            "user": r_user_input.value,
-                            "expires": now_req + 600,
-                            "step": 1,
-                            "last_request": now_req,
-                        }
-                        
-                        print("\n" + "!" * 20 + " 重置验证 (第 1 步) " + "!" * 20, flush=True)
-                        print(f"用户: {r_user_input.value} | IP: {client_ip}", flush=True)
-                        print(f"验证码 1: {code}", flush=True)
-                        print("!" * 60 + "\n", flush=True)
-                        import logging
-                        logging.getLogger("admin_reset").info(f"RESET_CODE_1: {code} for user {r_user_input.value}")
-                        
-                        r_code_input.set_visibility(True)
-                        r_user_input.disable()
-                        status_msg.set_text("第 1 次验证：请输入终端显示的 32 位重置码")
-                        req_btn.set_visibility(False)
-                        verify_btn.set_visibility(True)
-                        ui.notify("验证码 1 已发送至终端", color="positive")
-
-                    async def verify_step():
-                        info = reset_data.get(client_ip)
-                        if not info or time.time() > info["expires"]:
-                            ui.notify("验证已超时，请重新开始", color="warning")
-                            reset_dialog.close()
-                            return
-                        if r_code_input.value != info["code"]:
-                            ui.notify("验证码错误", color="negative")
-                            return
-                        if info["step"] == 1:
-                            new_code = generate_random_code()
-                            info["code"] = new_code
-                            info["step"] = 2
-                            r_code_input.value = ""
-                            status_msg.set_text("第 2 次验证：请输入终端显示的【新】验证码")
-                            print("\n" + "!" * 20 + " 重置验证 (第 2 步) " + "!" * 20, flush=True)
-                            print(f"用户: {info['user']} | IP: {client_ip}", flush=True)
-                            print(f"验证码 2: {new_code}", flush=True)
-                            print("!" * 60 + "\n", flush=True)
-                            import logging
-                            logging.getLogger("admin_reset").info(f"RESET_CODE_2: {new_code} for user {info['user']}")
-                            ui.notify("验证码 2 已发送至终端", color="info")
-                        elif info["step"] == 2:
-                            status_msg.set_text("验证通过！现在可以重置密码或数据库。")
-                            r_code_input.set_visibility(False)
-                            new_pwd_input.set_visibility(True)
-                            verify_btn.set_visibility(False)
-                            action_row.set_visibility(True)
-                            ui.notify("身份确认成功", color="positive")
-
-                    async def reset_password():
-                        info = reset_data.get(client_ip)
-                        if not new_pwd_input.value:
-                            ui.notify("请输入新密码", color="warning")
-                            return
-                        try:
-                            async with database.AsyncSessionLocal() as session:
-                                res = await session.execute(select(User).where(User.username == info["user"], User.is_admin))
-                                admin_user = res.scalars().first()
-                                if not admin_user:
-                                    ui.notify("权限验证失败", color="negative")
-                                    return
-                                admin_user.hashed_password = get_password_hash(new_pwd_input.value)
-                                await session.commit()
-                            ui.notify("密码已重置", color="positive")
-                            reset_dialog.close()
-                            del reset_data[client_ip]
-                        except Exception as e:
-                            ui.notify(f"重置失败: {e}", color="negative")
-
-                    async def dangerous_reset_db():
-                        try:
-                            async with database.engine.begin() as conn_db:
-                                from app.core.database import Base
-                                await conn_db.run_sync(Base.metadata.drop_all)
-                                await conn_db.run_sync(Base.metadata.create_all)
-                            ui.notify("数据库已彻底重置", color="positive")
-                            state.needs_setup = True
-                            reset_dialog.close()
-                            ui.navigate.to("/setup")
-                        except Exception as e:
-                            ui.notify(f"数据库重置失败: {e}", color="negative")
-
-                    req_btn = ui.button("获取重置码", on_click=request_code).classes("w-full shadow-md")
-                    verify_btn = ui.button("确认验证", on_click=verify_step).classes("w-full hidden shadow-md")
-                    with ui.row().classes("w-full justify-between hidden") as action_row:
-                        ui.button("重置密码", on_click=reset_password).props("color=primary elevated")
-                        with ui.button("重置数据库", icon="warning").props("color=negative outline"):
-                            with ui.menu():
-                                ui.menu_item("确认彻底删除所有数据？", on_click=dangerous_reset_db)
-                    with ui.row().classes("w-full justify-end mt-4"):
-                        ui.button("取消", on_click=reset_dialog.close).props("flat")

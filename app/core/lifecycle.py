@@ -62,7 +62,8 @@ async def startup_handler(state, modules_list, module_instances_dict):
         print("数据库初始化成功。")
     except Exception as e:
         import traceback
-        print(f"\nFATAL: 应用启动时数据库初始化失败:")
+
+        print("\nFATAL: 应用启动时数据库初始化失败:")
         print(f"错误摘要: {e}")
         print("完整错误堆栈:")
         print(traceback.format_exc())
@@ -79,9 +80,11 @@ async def startup_handler(state, modules_list, module_instances_dict):
             state.needs_setup = not admin_exists
         except Exception as e:
             print(f"初始化管理员检查失败: {e}")
-            state.needs_setup = True  # 检查失败时保守起见设为 True，允许进入 setup 尝试修复
+            state.needs_setup = (
+                True  # 检查失败时保守起见设为 True，允许进入 setup 尝试修复
+            )
     else:
-        state.needs_setup = True # 数据库未连上时也设为 True，setup 页面会处理连接等待
+        state.needs_setup = True  # 数据库未连上时也设为 True，setup 页面会处理连接等待
 
     load_modules(modules_list, module_instances_dict)
     # await sync_modules_with_db(state, modules_list) # 已禁用

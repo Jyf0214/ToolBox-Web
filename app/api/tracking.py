@@ -17,7 +17,11 @@ class GuestData(BaseModel):
 
 
 async def get_or_create_guest(
-    fingerprint: str, ip: str, user_agent: str, initialized_event: asyncio.Event, db_connected: bool
+    fingerprint: str,
+    ip: str,
+    user_agent: str,
+    initialized_event: asyncio.Event,
+    db_connected: bool,
 ):
     try:
         await asyncio.wait_for(initialized_event.wait(), timeout=10)
@@ -33,14 +37,12 @@ async def get_or_create_guest(
             select(Guest).where(Guest.fingerprint == fingerprint)
         )
         guest = result.scalars().first()
-        
+
         metadata = {"user_agent": user_agent}
-        
+
         if not guest:
             guest = Guest(
-                fingerprint=fingerprint, 
-                ip_address=ip,
-                metadata_json=metadata
+                fingerprint=fingerprint, ip_address=ip, metadata_json=metadata
             )
             session.add(guest)
         else:
