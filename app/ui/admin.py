@@ -350,11 +350,12 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                 )
 
                 with ui.column().classes("w-full gap-4"):
-                    r_user_input = ui.input("管理员用户名").classes("w-full")
-                    r_code_input = ui.input("重置码").classes("w-full hidden")
-                    new_pwd_input = ui.input("新密码", password=True).classes(
-                        "w-full hidden"
-                    )
+                    r_user_input = ui.input("管理员用户名").classes("w-full").props('outlined dense')
+                    r_code_input = ui.input("重置码").classes("w-full").props('outlined dense')
+                    r_code_input.set_visibility(False)
+                    
+                    new_pwd_input = ui.input("新密码", password=True).classes("w-full").props('outlined dense')
+                    new_pwd_input.set_visibility(False)
 
                     def generate_random_code():
                         alphabet = (
@@ -381,12 +382,14 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                             "step": 1,
                             "last_request": now_req,
                         }
+                        
                         print("\n" + "!" * 20 + " 重置验证 (第 1 步) " + "!" * 20, flush=True)
                         print(f"用户: {r_user_input.value} | IP: {client_ip}", flush=True)
                         print(f"验证码 1: {code}", flush=True)
                         print("!" * 60 + "\n", flush=True)
                         import logging
                         logging.getLogger("admin_reset").info(f"RESET_CODE_1: {code} for user {r_user_input.value}")
+                        
                         r_code_input.set_visibility(True)
                         r_user_input.disable()
                         status_msg.set_text("第 1 次验证：请输入终端显示的 32 位重置码")
