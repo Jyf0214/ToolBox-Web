@@ -75,7 +75,7 @@ jobs:
   build-base:
     name: Build & Push Base Image
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     outputs:
       base_updated: ${{ steps.filter.outputs.base }}
       app_updated: ${{ steps.filter.outputs.app }}
@@ -123,6 +123,7 @@ jobs:
       (
         needs.build-base.outputs.base_updated == 'true' ||
         needs.build-base.outputs.app_updated == 'true' ||
+        github.event_name == 'pull_request' ||
         github.event_name == 'workflow_dispatch' ||
         startsWith(github.ref, 'refs/tags/')
       )
@@ -162,7 +163,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # 核心：基础镜像更新后，强制拉取并基于最新 base 构建
           pull: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
