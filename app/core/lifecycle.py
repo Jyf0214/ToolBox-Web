@@ -6,7 +6,7 @@ from sqlalchemy import select
 from nicegui import app
 
 from app.core import database
-from app.models.models import User
+from app.models.models import AdminConfig
 from app.core.database import (
     Base,
     create_engine_with_ssl_fallback,
@@ -40,63 +40,45 @@ def load_modules(modules_list, module_instances_dict):
 
 
 async def sync_modules_with_db(state, modules_list):
-    """
-    [功能已删除] 原有的模块同步到数据库逻辑已移除。
-    待重建：基于新数据库架构的模块注册机制。
-    """
     if not state.db_connected:
         return
-    # 逻辑已删除
     pass
 
 
 async def startup_handler(state, modules_list, module_instances_dict):
     try:
         print("正在初始化数据库引擎 (强制 SSL)...")
-        # 增加超时处理
         await asyncio.wait_for(create_engine_with_ssl_fallback(), timeout=30)
         state.db_connected = True
 
         async with database.engine.begin() as conn:
+            # 创建所有表 (包括新的 admin_credentials)
             await conn.run_sync(Base.metadata.create_all)
 
-            # --- 自动热补丁: 补全缺失的列 (SQLAlchemy create_all 不处理 Alter) ---
+            # 补齐 tools 表的列
             from sqlalchemy import text
 
-            print("正在检查数据库表结构一致性...")
-
-            # 补齐 tools 表的列
             columns_to_add = [
                 ("requires_captcha", "BOOLEAN DEFAULT FALSE NOT NULL"),
                 ("rate_limit_count", "INTEGER DEFAULT 0 NOT NULL"),
                 ("rate_limit_period", "INTEGER DEFAULT 60 NOT NULL"),
             ]
-
             for col_name, col_def in columns_to_add:
                 try:
                     await conn.execute(
                         text(f"ALTER TABLE tools ADD COLUMN {col_name} {col_def}")
                     )
-                    print(f"补全成功: tools.{col_name}")
-                except Exception as e:
-                    if (
-                        "Duplicate column name" in str(e)
-                        or "already exists" in str(e).lower()
-                    ):
-                        pass  # 已存在，忽略
-                    else:
-                        print(f"同步 tools.{col_name} 失败: {e}")
+                except Exception:
+                    pass
 
-        print("数据库初始化与同步成功。")
+        print("数据库核心引擎就绪。")
     except Exception as e:
         import traceback
 
-        print("\nFATAL: 应用启动时数据库初始化失败:")
-        print(f"错误摘要: {e}")
-        print("完整错误堆栈:")
-        print(traceback.format_exc())
+        print(f"\nFATAL: 数据库初始化失败: {e}\n{traceback.format_exc()}")
         state.db_connected = False
 
+    # 核心：推翻原本逻辑，使用专门的 AdminConfig 表
     if state.db_connected:
         try:
             settings._SECRET_KEY = await get_or_create_secret_key()
@@ -105,27 +87,21 @@ async def startup_handler(state, modules_list, module_instances_dict):
             async with database.AsyncSessionLocal() as session:
                 from sqlalchemy import func
 
-                # 使用 count 聚合查询更高效
-                result = await session.execute(
-                    select(func.count(User.id)).where(User.is_admin)
-                )
-                admin_count = result.scalar()
+                # 直接查询 admin_credentials 表
+                result = await session.execute(select(func.count(AdminConfig.id)))
+                admin_count = result.scalar() or 0
 
             state.needs_setup = admin_count == 0
             print(
-                f"管理员账号检查完成: 已存在 {admin_count} 个管理员。Needs Setup: {state.needs_setup}"
+                f"管理员凭据检测: 表中存在 {admin_count} 个凭据。Needs Setup: {state.needs_setup}"
             )
         except Exception as e:
-            print(f"初始化管理员检查过程中出错: {e}")
-            # 如果是表不存在等错误，通常发生在初始化中，设为 True
+            print(f"管理员凭据表查询异常: {e}")
             state.needs_setup = True
     else:
-        # 数据库未连上时，保持 True 允许用户去 /setup 页面等待或修复
         state.needs_setup = True
 
     load_modules(modules_list, module_instances_dict)
-    # await sync_modules_with_db(state, modules_list) # 已禁用
-
     for m in modules_list:
         m.setup_api()
         app.include_router(m.router)

@@ -4,7 +4,7 @@ import string
 from nicegui import ui, app
 from sqlalchemy import select
 from app.core import database
-from app.models.models import User
+from app.models.models import AdminConfig
 from app.core.auth import verify_password, verify_turnstile
 from app.core.settings_manager import get_setting
 
@@ -89,7 +89,6 @@ async def render_login(client_ip, state, on_success):
 
                 # 验证 CAPTCHA
                 if site_key and secret_key:
-                    # 从浏览器获取 turnstile 的响应 token
                     token = await ui.run_javascript(
                         'try { return turnstile.getResponse(); } catch(e) { return ""; }'
                     )
@@ -99,7 +98,6 @@ async def render_login(client_ip, state, on_success):
                     is_human = await verify_turnstile(token, secret_key)
                     if not is_human:
                         ui.notify("验证码验证失败，请重试", color="negative")
-                        # 失败后重置验证码
                         await ui.run_javascript(
                             "try { turnstile.reset(); } catch(e) {}"
                         )
@@ -109,9 +107,10 @@ async def render_login(client_ip, state, on_success):
                     login_attempts[client_ip] = {"count": 0, "last_attempt": 0}
 
                 async with database.AsyncSessionLocal() as session:
+                    # 核心：从专门的 AdminConfig 表验证
                     res = await session.execute(
-                        select(User).where(
-                            User.username == user_input.value, User.is_admin
+                        select(AdminConfig).where(
+                            AdminConfig.username == user_input.value
                         )
                     )
                     admin = res.scalars().first()
@@ -132,7 +131,6 @@ async def render_login(client_ip, state, on_success):
                         ui.notify(msg, color="negative")
                         if rem <= 0:
                             on_success()
-                        # 登录失败重置验证码
                         if site_key:
                             await ui.run_javascript(
                                 "try { turnstile.reset(); } catch(e) {}"

@@ -3,7 +3,6 @@ from fastapi import Request
 from sqlalchemy import select, func
 
 from app.core import database
-from app.models.models import User
 from app.core.auth import is_authenticated
 from app.ui.admin_parts.auth import render_login
 from app.ui.admin_parts.dashboard import render_dashboard, render_settings, render_smtp
@@ -27,9 +26,9 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
         if state.db_connected:
             try:
                 async with database.AsyncSessionLocal() as session:
-                    res = await session.execute(
-                        select(func.count(User.id)).where(User.is_admin)
-                    )
+                    from app.models.models import AdminConfig
+
+                    res = await session.execute(select(func.count(AdminConfig.id)))
                     if res.scalar() > 0:
                         state.needs_setup = False
             except Exception:

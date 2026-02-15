@@ -44,6 +44,14 @@ class Tool(Base):
     rate_limit_period = Column(Integer, default=60, nullable=False)  # 默认 60 秒
 
 
+class AdminConfig(Base):
+    __tablename__ = "admin_credentials"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(255), unique=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class TaskHistory(Base):
     __tablename__ = "task_history"
     id = Column(Integer, primary_key=True, index=True)
