@@ -1,11 +1,13 @@
 import time
 import secrets
 import string
+import httpx
 from nicegui import ui, app
 from sqlalchemy import select
 from app.core import database
 from app.models.models import User
 from app.core.auth import verify_password
+from app.core.settings_manager import get_setting
 
 # 登录限流配置
 login_attempts = {}
@@ -14,7 +16,35 @@ LOCKOUT_TIME = 300
 reset_data = {}
 
 
+async def verify_turnstile(token: str, secret_key: str) -> bool:
+    """后端验证 Cloudflare Turnstile Token"""
+    if not token:
+        return False
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                data={"secret": secret_key, "response": token},
+                timeout=10.0,
+            )
+            data = res.json()
+            return data.get("success", False)
+    except Exception as e:
+        print(f"[Security] Turnstile verification error: {e}")
+        return False
+
+
 async def render_login(client_ip, state, on_success):
+    # 获取配置
+    site_key = await get_setting("cf_turnstile_site_key", "")
+    secret_key = await get_setting("cf_turnstile_secret_key", "")
+
+    # 注入 Cloudflare 脚本
+    if site_key:
+        ui.add_head_html(
+            '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>'
+        )
+
     now = time.time()
     if client_ip in login_attempts:
         attempts = login_attempts[client_ip]
@@ -61,6 +91,13 @@ async def render_login(client_ip, state, on_success):
                 .props('outlined dense prepend-icon="lock"')
             )
 
+            # Cloudflare Turnstile 容器
+            if site_key:
+                with ui.element("div").classes("w-full flex justify-center mb-4"):
+                    ui.html(
+                        f'<div class="cf-turnstile" data-sitekey="{site_key}"></div>'
+                    )
+
             async def login():
                 if not state.db_connected:
                     ui.notify("数据库未连接", color="negative")
@@ -68,6 +105,24 @@ async def render_login(client_ip, state, on_success):
                 if not user_input.value or not pwd.value:
                     ui.notify("请输入账号密码", color="warning")
                     return
+
+                # 验证 CAPTCHA
+                if site_key and secret_key:
+                    # 从浏览器获取 turnstile 的响应 token
+                    token = await ui.run_javascript(
+                        'try { return turnstile.getResponse(); } catch(e) { return ""; }'
+                    )
+                    if not token:
+                        ui.notify("请先完成人机验证", color="warning")
+                        return
+                    is_human = await verify_turnstile(token, secret_key)
+                    if not is_human:
+                        ui.notify("验证码验证失败，请重试", color="negative")
+                        # 失败后重置验证码
+                        await ui.run_javascript(
+                            "try { turnstile.reset(); } catch(e) {}"
+                        )
+                        return
 
                 if client_ip not in login_attempts:
                     login_attempts[client_ip] = {"count": 0, "last_attempt": 0}
@@ -96,6 +151,11 @@ async def render_login(client_ip, state, on_success):
                         ui.notify(msg, color="negative")
                         if rem <= 0:
                             on_success()
+                        # 登录失败重置验证码
+                        if site_key:
+                            await ui.run_javascript(
+                                "try { turnstile.reset(); } catch(e) {}"
+                            )
 
             pwd.on("keydown.enter", login)
             ui.button("进入系统", on_click=login).classes(

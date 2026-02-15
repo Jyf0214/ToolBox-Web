@@ -29,21 +29,77 @@ async def render_dashboard(state):
 
 
 async def render_settings(state):
-    ui.label("站点设置").classes("text-2xl font-bold mb-6")
-    with ui.card().classes("w-full p-6 shadow-sm border"):
+    ui.label("安全与站点设置").classes("text-2xl font-bold mb-6")
+
+    # 站点基础设置
+    with ui.card().classes("w-full p-6 shadow-sm border mb-6"):
+        ui.label("基础设置").classes("text-lg font-bold mb-4")
         curr_name = await get_setting("site_name", settings.SITE_NAME)
         name_in = (
             ui.input("站点名称", value=curr_name).classes("w-full").props("outlined")
         )
 
-        async def save():
+        async def save_base():
             await set_setting("site_name", name_in.value)
-            ui.notify("已保存")
+            ui.notify("基础设置已保存")
 
-        if not state.db_connected:
-            ui.button("保存", on_click=save).classes("mt-4").disable()
-        else:
-            ui.button("保存", on_click=save).classes("mt-4")
+        ui.button("保存基础设置", on_click=save_base).classes("mt-4")
+
+    # 管理员访问白名单
+    with ui.card().classes("w-full p-6 shadow-sm border mb-6"):
+        ui.label("管理员安全限制").classes("text-lg font-bold mb-4")
+        ui.markdown(
+            "仅允许以下 IP 或域名访问管理页面。多个请用逗号分隔。留空则不限制。"
+        ).classes("text-xs text-slate-500 mb-2")
+        allowed_hosts = await get_setting("admin_allowed_hosts", "")
+        hosts_in = (
+            ui.input(
+                "允许访问的站点/IP",
+                value=allowed_hosts,
+                placeholder="127.0.0.1, admin.example.com",
+            )
+            .classes("w-full")
+            .props("outlined")
+        )
+
+        async def save_security():
+            await set_setting("admin_allowed_hosts", hosts_in.value)
+            ui.notify("安全设置已保存")
+
+        ui.button("保存安全设置", on_click=save_security).classes("mt-4")
+
+    # Cloudflare Turnstile 设置
+    with ui.card().classes("w-full p-6 shadow-sm border"):
+        ui.label("Cloudflare Turnstile 验证码").classes("text-lg font-bold mb-4")
+        ui.markdown("配置后将在管理员登录页面启用人机验证。").classes(
+            "text-xs text-slate-500 mb-2"
+        )
+
+        cf_site_key = await get_setting("cf_turnstile_site_key", "")
+        cf_secret_key = await get_setting("cf_turnstile_secret_key", "")
+
+        sk_in = (
+            ui.input("Site Key", value=cf_site_key)
+            .classes("w-full")
+            .props("outlined dense")
+        )
+        sec_in = (
+            ui.input(
+                "Secret Key",
+                value=cf_secret_key,
+                password=True,
+                password_toggle_button=True,
+            )
+            .classes("w-full")
+            .props("outlined dense")
+        )
+
+        async def save_cf():
+            await set_setting("cf_turnstile_site_key", sk_in.value)
+            await set_setting("cf_turnstile_secret_key", sec_in.value)
+            ui.notify("Cloudflare 配置已保存")
+
+        ui.button("保存验证码配置", on_click=save_cf).classes("mt-4")
 
 
 async def render_smtp():

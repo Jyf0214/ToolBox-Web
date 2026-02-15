@@ -18,10 +18,34 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
     @ui.page("/admin")
     async def admin_page(request: Request):
         client_ip = request.client.host
+        request_host = request.headers.get("host", "")
 
         if state.needs_setup:
             ui.navigate.to("/setup")
             return
+
+        # --- 管理员访问白名单检查 ---
+        from app.core.settings_manager import get_setting
+
+        allowed_hosts_str = await get_setting("admin_allowed_hosts", "")
+        if allowed_hosts_str:
+            allowed_hosts = [
+                h.strip() for h in allowed_hosts_str.split(",") if h.strip()
+            ]
+            if client_ip not in allowed_hosts and request_host not in allowed_hosts:
+                with ui.card().classes(
+                    "absolute-center p-8 text-center shadow-lg border-t-4 border-red-500"
+                ):
+                    ui.icon("block", color="negative", size="xl").classes("mb-4")
+                    ui.label("访问被拒绝").classes("text-h5 mb-2")
+                    ui.label("您的站点/IP 未在管理员白名单中。").classes(
+                        "text-slate-500 mb-4"
+                    )
+                    ui.label(f"当前 IP: {client_ip}").classes("text-[10px] font-mono")
+                    ui.button("回到首页", on_click=lambda: ui.navigate.to("/")).props(
+                        "flat"
+                    )
+                return
 
         @ui.refreshable
         async def render_content():
