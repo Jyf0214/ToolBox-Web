@@ -31,6 +31,13 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: docker-backslash-check
+        name: Check for dangling backslashes in Dockerfiles
+        entry: python3 scripts/check_docker_backslash.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.6
     hooks:

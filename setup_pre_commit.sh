@@ -30,6 +30,7 @@ if pre-commit run --all-files; then
     echo "语法检查: ruff (强制)"
     echo "安全检查: bandit (拦截中/高风险)"
     echo "注释检查: 过滤无意义注释 (强制)"
+    echo "镜像检查: Dockerfile 换行符规范 (强制)"
     echo "今后您在执行 'git commit' 时将自动执行这些检查。"
     echo "===================================================="
 else
