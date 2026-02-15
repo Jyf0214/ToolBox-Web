@@ -22,7 +22,6 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
         client_ip = request.client.host
         request_host = request.headers.get("host", "")
 
-        # --- 紧急强制校验: 确保不会在有管理员的情况下进入 setup ---
         if state.db_connected:
             try:
                 async with database.AsyncSessionLocal() as session:
@@ -38,7 +37,6 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
             ui.navigate.to("/setup")
             return
 
-        # --- 管理员访问白名单检查 ---
         from app.core.settings_manager import get_setting
 
         allowed_hosts_str = await get_setting("admin_allowed_hosts", "")
@@ -61,13 +59,9 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                     )
                 return
 
-        # 如果未登录，直接渲染登录组件并返回
         if not is_authenticated():
             await render_login(client_ip, state, lambda: ui.navigate.to("/admin"))
             return
-
-        # --- 页面内容骨架 (立即响应) ---
-        # 使用 Header 和 Drawer 占位，内容通过异步加载
 
         with ui.header().classes("bg-slate-900 items-center justify-between px-4 py-2"):
             with ui.row().classes("items-center"):
@@ -178,8 +172,6 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                 else:
                     btn.classes(remove="bg-primary text-white", add="text-slate-600")
 
-        # --- 内容容器 ---
-        # 页面初始只创建容器，不运行耗时的 render 函数
         main_container = ui.column().classes("p-4 sm:p-8 w-full max-w-5xl mx-auto")
         with main_container:
             sections["dashboard"] = ui.column().classes("w-full")
@@ -191,7 +183,6 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
             sections["status"] = ui.column().classes("w-full hidden")
             sections["logs"] = ui.column().classes("w-full hidden")
 
-        # --- 异步加载数据 (解决 3s 超时) ---
         async def load_all_sections():
             with sections["dashboard"]:
                 await render_dashboard(state)
@@ -212,8 +203,6 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
             with sections["logs"]:
                 await render_logs(state)
 
-            # 加载完成后激活默认菜单样式
             switch_to("dashboard")
 
-        # 启动后台加载任务，不阻塞页面返回
         ui.timer(0.1, load_all_sections, once=True)

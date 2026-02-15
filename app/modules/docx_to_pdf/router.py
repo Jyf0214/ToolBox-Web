@@ -32,7 +32,6 @@ class DocxToPdfModule(BaseModule):
             return {"error": "未找到文件"}
 
     def _get_pdf_info(self, pdf_path: str) -> dict:
-        """获取 PDF 信息，如页数"""
         try:
             from PyPDF2 import PdfReader
 
@@ -85,7 +84,6 @@ class DocxToPdfModule(BaseModule):
             "上传 `.docx` 文件，将其转换为高质量的 PDF，支持页数统计与在线预览。"
         ).classes("mb-4 text-slate-500")
 
-        # 1. 动态加载工具安全配置
         async def get_tool_security():
             from app.core import database
             from app.models.models import Tool
@@ -97,7 +95,6 @@ class DocxToPdfModule(BaseModule):
                 )
                 return res.scalars().first()
 
-        # 状态容器
         security_state = {"site_key": "", "secret_key": "", "requires_captcha": False}
 
         async def init_security():
@@ -122,7 +119,6 @@ class DocxToPdfModule(BaseModule):
                             f'<div class="cf-turnstile" data-sitekey="{security_state["site_key"]}"></div>'
                         )
 
-        # 错误日志对话框
         with ui.dialog() as error_dialog, ui.card().classes("w-full max-w-2xl"):
             ui.label("详细错误日志").classes("text-h6")
             error_log_area = ui.textarea().classes("w-full h-64").props("readonly")
@@ -135,7 +131,6 @@ class DocxToPdfModule(BaseModule):
                     ),
                 ).props("icon=content_copy")
 
-        # 预览对话框
         with (
             ui.dialog() as preview_dialog,
             ui.card().classes("w-[90vw] h-[90vh] max-w-none"),
@@ -155,7 +150,6 @@ class DocxToPdfModule(BaseModule):
         with ui.card().classes("w-full max-w-2xl p-6 shadow-md"):
             state = {"name": "", "content": None, "processing": False}
 
-            # 进度条
             progress_bar = ui.linear_progress(value=0, show_value=False).classes(
                 "mb-4 hidden"
             )
@@ -219,7 +213,6 @@ class DocxToPdfModule(BaseModule):
                 from app.core.task_manager import global_task_manager
                 from app.core.auth import is_authenticated, verify_turnstile
 
-                # 3. 验证 CAPTCHA (如果启用)
                 if (
                     security_state["requires_captcha"]
                     and security_state["site_key"]
@@ -246,7 +239,6 @@ class DocxToPdfModule(BaseModule):
                 state["processing"] = True
                 convert_btn.disable()
 
-                # 1. 加入队列
                 task = await global_task_manager.add_task(
                     name="Word 转 PDF",
                     user_type="admin" if is_authenticated() else "guest",
@@ -259,7 +251,6 @@ class DocxToPdfModule(BaseModule):
                 progress_bar.props("color=orange")
                 result_card.set_visibility(False)
 
-                # 异步模拟进度增长
                 async def simulate_fake_progress():
                     current = 0.05
                     while state["processing"] and current < 0.95:
@@ -272,7 +263,6 @@ class DocxToPdfModule(BaseModule):
                 asyncio.create_task(simulate_fake_progress())
 
                 try:
-                    # 2. 等待排队
                     while True:
                         waiting_ids = [t.id for t in global_task_manager.queue]
                         if task.id in waiting_ids:
@@ -300,7 +290,6 @@ class DocxToPdfModule(BaseModule):
                         shutil.which("libreoffice") or "/usr/bin/libreoffice"
                     )
 
-                    # 运行实际转换
                     process = await asyncio.create_subprocess_exec(
                         libreoffice_path,
                         "--headless",
@@ -320,7 +309,7 @@ class DocxToPdfModule(BaseModule):
                             self._add_blank_page_if_needed(output_path, True)
 
                         info = self._get_pdf_info(output_path)
-                        state["processing"] = False  # 停止模拟进度
+                        state["processing"] = False
                         progress_bar.set_value(1.0)
                         progress_bar.props("color=green")
                         status_label.set_text("转换完成！")
@@ -328,7 +317,6 @@ class DocxToPdfModule(BaseModule):
 
                         download_url = f"{self.router.prefix}/download/{file_id}"
 
-                        # 展示美化后的结果
                         result_card.clear()
                         result_card.set_visibility(True)
                         with result_card:
@@ -368,7 +356,6 @@ class DocxToPdfModule(BaseModule):
                     ui.notify("程序出错", color="negative")
                     show_error_report(str(ex))
                 finally:
-                    # 3. 释放任务
                     await global_task_manager.complete_task(task.id)
                     state["processing"] = False
                     convert_btn.enable()

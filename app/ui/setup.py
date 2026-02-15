@@ -14,6 +14,10 @@ def create_setup_page(state):
 
         with ui.card().classes("absolute-center w-[90vw] max-w-md shadow-lg p-6"):
             ui.label("系统初始化").classes("text-h5 text-center mb-4")
+            ui.label("系统检测到这是第一次运行或尚未配置管理员。").classes(
+                "text-xs text-slate-500 mb-4 text-center"
+            )
+
             admin_username = (
                 ui.input("管理员账号", value="admin")
                 .classes("w-full")
@@ -43,14 +47,12 @@ def create_setup_page(state):
                     async with database.AsyncSessionLocal() as session:
                         from sqlalchemy import select, func
 
-                        # 再次确认是否已有管理员
                         res = await session.execute(select(func.count(AdminConfig.id)))
                         if res.scalar() > 0:
                             state.needs_setup = False
                             ui.navigate.to("/admin")
                             return
 
-                        # 创建管理员凭据
                         admin = AdminConfig(
                             username=admin_username.value,
                             hashed_password=get_password_hash(admin_password.value),

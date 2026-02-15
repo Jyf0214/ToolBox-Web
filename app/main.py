@@ -12,7 +12,6 @@ from app.ui.licenses_page import create_licenses_page
 from app.core.settings_manager import get_local_secret
 
 
-# --- 缓存控制中间件 ---
 @app.middleware("http")
 async def add_no_cache_headers(request: Request, call_next):
     response: Response = await call_next(request)
@@ -24,7 +23,6 @@ async def add_no_cache_headers(request: Request, call_next):
     return response
 
 
-# --- 全局状态 ---
 class State:
     needs_setup = True
     initialized = asyncio.Event()
@@ -36,18 +34,15 @@ modules = []
 module_instances = {}
 
 
-# --- 初始化与路由 ---
 @app.on_startup
 async def on_startup():
     await startup_handler(state, modules, module_instances)
 
 
-# 全局异常处理逻辑
 def handle_exception(e: Exception):
     from app.core.auth import is_authenticated
     from app.core.updater import generate_emergency_token, pull_updates
 
-    # 记录错误
     print(f"CRITICAL ERROR: {e}")
 
     if is_authenticated():
@@ -85,10 +80,8 @@ def handle_exception(e: Exception):
 
 app.on_exception(handle_exception)
 
-# 注册 API 路由
 app.include_router(setup_tracking_api(state))
 
-# 注册 UI 页面
 create_setup_page(state)
 create_main_page(state, modules)
 create_licenses_page()
@@ -98,7 +91,6 @@ create_admin_page(
     lambda: sync_modules_with_db(state, modules),
 )
 
-# --- 启动应用 ---
 ui.run(
     title=f"工具箱 v{settings.VERSION}",
     storage_secret=get_local_secret(),
