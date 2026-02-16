@@ -197,8 +197,6 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
             try:
                 # 预加载所有组件内容
                 async def run_section(name, func):
-                    if main_container._is_deleted or sections[name]._is_deleted:
-                        return False
                     try:
                         with sections[name]:
                             await func() if asyncio.iscoroutinefunction(
@@ -211,8 +209,13 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                         raise
                     except Exception as e:
                         print(f"Error rendering {name}: {e}")
-                        with sections[name]:
-                            ui.label(f"{name} 加载失败: {e}").classes("text-negative")
+                        try:
+                            with sections[name]:
+                                ui.label(f"{name} 加载失败: {e}").classes(
+                                    "text-negative"
+                                )
+                        except Exception:
+                            pass
                         return True
 
                 if not await run_section("dashboard", lambda: render_dashboard(state)):
@@ -245,12 +248,13 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                     return
 
                 # 加载完成后隐藏 loading，显示默认 dashboard
-                if not loading_spinner._is_deleted:
-                    loading_spinner.set_visibility(False)
-                    switch_to("dashboard")
+                loading_spinner.set_visibility(False)
+                switch_to("dashboard")
             except Exception as e:
                 print(f"Critical error in load_all_sections: {e}")
-                if not main_container._is_deleted:
+                try:
                     ui.notify("管理后台组件初始化发生严重错误", color="negative")
+                except Exception:
+                    pass
 
         ui.timer(0.1, load_all_sections, once=True)

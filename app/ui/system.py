@@ -20,13 +20,16 @@ async def render_system_status(state):
         m_lab = ui.label("MEM: -")
 
         async def update_stats():
-            if c_lab._is_deleted or m_lab._is_deleted:
-                return
-            s = global_task_manager.get_system_stats()
-            c_lab.set_text(f"CPU: {s['cpu_percent']}%")
-            m_lab.set_text(
-                f"MEM: {s['memory_percent']}% ({s['memory_available']}G Free)"
-            )
+            try:
+                s = global_task_manager.get_system_stats()
+                c_lab.set_text(f"CPU: {s['cpu_percent']}%")
+                m_lab.set_text(
+                    f"MEM: {s['memory_percent']}% ({s['memory_available']}G Free)"
+                )
+            except RuntimeError as e:
+                if "parent slot" in str(e):
+                    return
+                raise
 
         ui.timer(2.0, update_stats)
 

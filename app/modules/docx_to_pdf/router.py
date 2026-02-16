@@ -102,27 +102,29 @@ class DocxToPdfModule(BaseModule):
         async def init_security():
             from app.core.settings_manager import get_setting
 
-            if captcha_container._is_deleted:
-                return
-
-            tool = await get_tool_security()
-            if tool and tool.requires_captcha:
-                security_state["requires_captcha"] = True
-                security_state["site_key"] = await get_setting(
-                    "cf_turnstile_site_key", ""
-                )
-                security_state["secret_key"] = await get_setting(
-                    "cf_turnstile_secret_key", ""
-                )
-                if security_state["site_key"]:
-                    ui.add_head_html(
-                        '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>'
+            try:
+                tool = await get_tool_security()
+                if tool and tool.requires_captcha:
+                    security_state["requires_captcha"] = True
+                    security_state["site_key"] = await get_setting(
+                        "cf_turnstile_site_key", ""
                     )
-                    captcha_container.set_visibility(True)
-                    with captcha_container:
-                        ui.html(
-                            f'<div class="cf-turnstile" data-sitekey="{security_state["site_key"]}"></div>'
+                    security_state["secret_key"] = await get_setting(
+                        "cf_turnstile_secret_key", ""
+                    )
+                    if security_state["site_key"]:
+                        ui.add_head_html(
+                            '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>'
                         )
+                        captcha_container.set_visibility(True)
+                        with captcha_container:
+                            ui.html(
+                                f'<div class="cf-turnstile" data-sitekey="{security_state["site_key"]}"></div>'
+                            )
+            except RuntimeError as e:
+                if "parent slot" in str(e):
+                    return
+                raise
 
         with ui.dialog() as error_dialog, ui.card().classes("w-full max-w-2xl"):
             ui.label("详细错误日志").classes("text-h6")
