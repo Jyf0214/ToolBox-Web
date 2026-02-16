@@ -78,6 +78,7 @@ def create_main_page(state, modules):
                                     "text-[10px] text-slate-400 underline cursor-help"
                                 )
 
+                    # Container for queue status to manage timer lifecycle safely
                     q_container = ui.element("div")
                     with q_container:
                         queue_status_ui()
