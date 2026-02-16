@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-02-16
+
+### Changed
+- 优化文件下载体验，移除IP验证和过期验证机制，保留基本token验证防止用户间文件混淆。
+- 将下载按钮替换为直接显示的下载链接，提升用户操作便捷性。
+- 更新archive_to_pdf、docx_to_pdf和md_to_pdf三个模块的UI和安全策略。
+
+### Security
+- 保留基本的token验证机制，确保用户只能访问自己生成的文件。
+- 移除严格的IP绑定和过期限制，平衡安全性与用户体验。
+
 ## [0.2.0] - 2026-02-16
 
 ### Security
