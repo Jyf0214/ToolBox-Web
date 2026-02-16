@@ -482,7 +482,10 @@ class ArchiveToPdfModule(BaseModule):
                     while state["processing"] and current < 0.95:
                         increment = (0.98 - current) / 15
                         current += increment
-                        progress_bar.set_value(current)
+                        try:
+                            progress_bar.set_value(current)
+                        except Exception:
+                            pass
                         await asyncio.sleep(0.5)
 
                 asyncio.create_task(simulate_progress())
@@ -649,5 +652,6 @@ class ArchiveToPdfModule(BaseModule):
             )
             convert_btn.disable()
 
-        ui.timer(0.1, init_security, once=True)
+        with ui.element("div"):
+            ui.timer(0.1, init_security, once=True)
         self._start_cleanup_timer()

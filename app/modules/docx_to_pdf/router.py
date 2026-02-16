@@ -256,7 +256,10 @@ class DocxToPdfModule(BaseModule):
                         # 进度越往后越慢，模拟真实复杂任务的处理感
                         increment = (0.98 - current) / 15
                         current += increment
-                        progress_bar.set_value(current)
+                        try:
+                            progress_bar.set_value(current)
+                        except Exception:
+                            pass
                         await asyncio.sleep(0.8)
 
                 asyncio.create_task(simulate_fake_progress())
@@ -366,4 +369,5 @@ class DocxToPdfModule(BaseModule):
             )
             convert_btn.disable()
 
-        ui.timer(0.1, init_security, once=True)
+        with ui.element("div"):
+            ui.timer(0.1, init_security, once=True)
