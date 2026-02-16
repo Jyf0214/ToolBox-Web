@@ -237,10 +237,15 @@ class ArchiveToPdfModule(BaseModule):
             print(f"转换md失败: {e}")
             return None
 
-    def _process_directory(self, input_dir: str, output_dir: str) -> Tuple[int, int]:
+    def _process_directory(
+        self, input_dir: str, output_dir: str, progress_info: dict = None
+    ) -> Tuple[int, int]:
         """
         递归处理目录中的所有文档
-        返回: (成功转换数, 总文件数)
+        :param input_dir: 输入目录
+        :param output_dir: 输出目录
+        :param progress_info: 进度信息字典 {'current': 0, 'total': 0}
+        :return: (成功转换数, 总文件数)
         """
         success_count = 0
         total_count = 0
@@ -281,6 +286,10 @@ class ArchiveToPdfModule(BaseModule):
                     result = self._convert_md_to_pdf(file_path, current_output_dir)
                     if result:
                         success_count += 1
+                
+                # 更新进度
+                if progress_info is not None:
+                    progress_info["current"] += 1
 
         return success_count, total_count
 
@@ -477,18 +486,37 @@ class ArchiveToPdfModule(BaseModule):
                 progress_bar.props("color=orange")
                 result_card.set_visibility(False)
 
-                async def simulate_progress():
-                    current = 0.05
-                    while state["processing"] and current < 0.95:
-                        increment = (0.98 - current) / 15
-                        current += increment
-                        try:
-                            progress_bar.set_value(current)
-                        except Exception:
-                            pass
+                # 进度信息共享字典
+                progress_info = {"current": 0, "total": 0}
+
+                async def monitor_progress():
+                    """监控真实进度或模拟进度"""
+                    while state["processing"]:
+                        if progress_info["total"] > 0:
+                            # 真实进度模式（批量）
+                            p = progress_info["current"] / progress_info["total"]
+                            # 限制最大 99%，给打包预留空间
+                            if p > 0.99:
+                                p = 0.99
+                            try:
+                                progress_bar.set_value(p)
+                                status_label.set_text(
+                                    f"正在转换... ({progress_info['current']}/{progress_info['total']})"
+                                )
+                            except Exception:
+                                pass
+                        else:
+                            # 模拟进度模式（单文件或初始化阶段）
+                            current_val = progress_bar.value
+                            if current_val < 0.95:
+                                increment = (0.98 - current_val) / 20
+                                try:
+                                    progress_bar.set_value(current_val + increment)
+                                except Exception:
+                                    pass
                         await asyncio.sleep(0.5)
 
-                asyncio.create_task(simulate_progress())
+                asyncio.create_task(monitor_progress())
 
                 try:
                     while True:
@@ -531,17 +559,31 @@ class ArchiveToPdfModule(BaseModule):
                                     self._extract_archive(file_path, temp_input)
                                     os.remove(file_path)
 
+                        # 预先扫描计算总文件数
+                        total_files = 0
+                        for root, _, files in os.walk(temp_input):
+                            for file in files:
+                                if file.lower().endswith((".docx", ".md")):
+                                    total_files += 1
+                        progress_info["total"] = total_files
+
+                        if total_files == 0:
+                            raise Exception("没有找到可转换的文档")
+
+                        status_label.set_text(f"准备转换 {total_files} 个文件...")
+
                         (
                             success_count,
                             total_count,
                         ) = await asyncio.get_event_loop().run_in_executor(
-                            None, self._process_directory, temp_input, output_dir
+                            None,
+                            self._process_directory,
+                            temp_input,
+                            output_dir,
+                            progress_info,
                         )
 
                         status_label.set_text("正在打包结果...")
-
-                        if total_count == 0:
-                            raise Exception("没有找到可转换的文档")
 
                         output_zip_name = "converted_files.zip"
                         output_zip_path = os.path.join(work_dir, output_zip_name)
