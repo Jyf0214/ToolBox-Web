@@ -477,7 +477,7 @@ class ArchiveToPdfModule(BaseModule):
             ]
 
             new_failed_files = []
-            with Pool(processes=min(2, len(failed_files))) as pool:
+            with Pool(processes=1) as pool:
                 result_async = pool.map_async(_convert_single_file, failed_tasks)
 
                 # 监控进度
@@ -596,7 +596,7 @@ class ArchiveToPdfModule(BaseModule):
             error_dialog.open()
 
         with ui.card().classes("w-full max-w-3xl p-6 shadow-md"):
-            state = {"files": [], "processing": False}
+            state = {"files": [], "processing": False, "show_result": False}
 
             # 使用自定义 HTML 元素构建进度条，解决组件显示冲突问题
             with (
@@ -691,8 +691,12 @@ class ArchiveToPdfModule(BaseModule):
 
             file_list_container
 
-            result_card = ui.card().classes(
-                "w-full p-4 bg-slate-50 border-dashed border-2 border-slate-200 hidden mt-4"
+            result_card = (
+                ui.card()
+                .classes(
+                    "w-full p-4 bg-slate-50 border-dashed border-2 border-slate-200 mt-4"
+                )
+                .bind_visibility_from(state, "show_result", lambda v: v)
             )
 
             async def convert():
@@ -738,7 +742,7 @@ class ArchiveToPdfModule(BaseModule):
                 safe_ui(status_label.style, "display: block")
                 safe_ui(progress_container.style, "display: block")
                 safe_ui(progress_bar_inner.style, "width: 0%")
-                safe_ui(result_card.set_visibility, False)
+                state["show_result"] = False
 
                 # 进度信息共享字典
                 progress_info = {"current": 0, "total": 0}
@@ -913,7 +917,7 @@ class ArchiveToPdfModule(BaseModule):
 
                         try:
                             result_card.clear()
-                            result_card.set_visibility(True)
+                            state["show_result"] = True
                             with result_card:
                                 with ui.row().classes(
                                     "w-full items-center justify-between"
@@ -983,7 +987,7 @@ class ArchiveToPdfModule(BaseModule):
 
                         try:
                             result_card.clear()
-                            result_card.set_visibility(True)
+                            state["show_result"] = True
                             with result_card:
                                 with ui.row().classes(
                                     "w-full items-center justify-between"
