@@ -1,11 +1,15 @@
 import os
 import uuid
 import asyncio
+import secrets
+import hashlib
+import time
 from pathlib import Path
 from app.modules.base import BaseModule
 from nicegui import ui, app
 from fastapi import Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.requests import Request
 
 
 class DocxToPdfModule(BaseModule):
@@ -13,7 +17,33 @@ class DocxToPdfModule(BaseModule):
         super().__init__()
         self.temp_dir = os.path.join(os.getcwd(), "temp_files")
         os.makedirs(self.temp_dir, exist_ok=True)
+        self._download_tokens = {}
         self.setup_api()
+        self._start_cleanup_timer()
+
+    def _generate_token(self, ip: str, file_id: str) -> str:
+        raw = f"{ip}:{file_id}:{secrets.randbelow(1000000)}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+    def _start_cleanup_timer(self):
+        from threading import Thread
+
+        def cleanup():
+            while True:
+                time.sleep(3600)
+                try:
+                    current_time = time.time()
+                    expired_keys = [
+                        k
+                        for k, v in self._download_tokens.items()
+                        if current_time - v.get("created_at", 0) > 3600
+                    ]
+                    for k in expired_keys:
+                        del self._download_tokens[k]
+                except Exception:
+                    pass
+
+        Thread(target=cleanup, daemon=True).start()
 
     @property
     def name(self):
@@ -25,21 +55,68 @@ class DocxToPdfModule(BaseModule):
 
     def setup_api(self):
         @app.get(f"{self.router.prefix}/download/{{file_id}}/{{file_name}}")
-        async def download_pdf(request: Request, file_id: str, file_name: str):
+        async def download_pdf(
+            request: Request, file_id: str, file_name: str, token: str = None
+        ):
             headers = request.headers
-            # 严格校验：禁止直接通过 URL 访问 API
+            # 深度头部校验：确保请求是由真实的浏览器下载行为触发的
             if headers.get("sec-fetch-site") == "none":
-                return {"error": "Access Denied"}
+                return JSONResponse(status_code=403, content={"error": "禁止直接访问"})
+
+            client_ip = request.client.host
+            if "x-forwarded-for" in request.headers:
+                client_ip = request.headers["x-forwarded-for"].split(",")[0]
 
             # 路径安全防护：强制仅提取文件名，防止穿越攻击
             safe_id = os.path.basename(file_id)
             safe_name = os.path.basename(file_name)
             file_path = os.path.join(self.temp_dir, safe_id, safe_name)
-            if os.path.exists(file_path):
-                return FileResponse(
-                    file_path, media_type="application/pdf", filename=safe_name
+
+            if not os.path.exists(file_path):
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "文件不存在或已过期", "reason": "file_not_found"},
                 )
-            return {"error": "未找到文件"}
+
+            token_key = f"{safe_id}:{safe_name}"
+            token_info = self._download_tokens.get(token_key)
+
+            if not token_info:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": "无效的下载链接",
+                        "reason": "download_link_invalid",
+                    },
+                )
+
+            if token_info["ip"] != client_ip:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": "IP不匹配，请使用上传时的网络下载",
+                        "reason": "ip_mismatch",
+                    },
+                )
+
+            if token != token_info["token"]:
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "下载Token无效", "reason": "token_invalid"},
+                )
+
+            if time.time() - token_info.get("created_at", 0) > 3600:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": "下载链接已过期，请重新转换文件",
+                        "reason": "link_expired",
+                    },
+                )
+
+            return FileResponse(
+                file_path, media_type="application/pdf", filename=safe_name
+            )
 
     def _get_pdf_info(self, pdf_path: str) -> dict:
         try:
@@ -182,16 +259,22 @@ class DocxToPdfModule(BaseModule):
             state = {"name": "", "content": None, "processing": False}
 
             # 使用自定义 HTML 元素构建进度条，解决组件显示冲突问题
-            with ui.element("div").classes(
-                "w-full bg-slate-100 rounded-full h-3 mb-4 overflow-hidden"
-            ).style("display: none") as progress_container:
-                progress_bar_inner = ui.element("div").classes(
-                    "bg-blue-500 h-full transition-all duration-300"
-                ).style("width: 0%")
+            with (
+                ui.element("div")
+                .classes("w-full bg-slate-100 rounded-full h-3 mb-4 overflow-hidden")
+                .style("display: none") as progress_container
+            ):
+                progress_bar_inner = (
+                    ui.element("div")
+                    .classes("bg-blue-500 h-full transition-all duration-300")
+                    .style("width: 0%")
+                )
 
-            status_label = ui.label("等待上传...").classes(
-                "text-sm text-slate-500 mb-2"
-            ).style("display: none")
+            status_label = (
+                ui.label("等待上传...")
+                .classes("text-sm text-slate-500 mb-2")
+                .style("display: none")
+            )
 
             captcha_container = ui.element("div").classes(
                 "w-full flex justify-center mb-4 hidden"
@@ -298,7 +381,9 @@ class DocxToPdfModule(BaseModule):
                                     # 进度越往后越慢
                                     increment = (0.98 - current_val) / 20
                                     new_p = (current_val + increment) * 100
-                                    safe_ui(progress_bar_inner.style, f"width: {new_p}%")
+                                    safe_ui(
+                                        progress_bar_inner.style, f"width: {new_p}%"
+                                    )
                             except Exception:
                                 pass
                             await asyncio.sleep(0.8)
@@ -311,7 +396,8 @@ class DocxToPdfModule(BaseModule):
                             if task.id in waiting_ids:
                                 pos = waiting_ids.index(task.id) + 1
                                 safe_ui(
-                                    status_label.set_text, f"排队中: 前方有 {pos - 1} 个任务..."
+                                    status_label.set_text,
+                                    f"排队中: 前方有 {pos - 1} 个任务...",
                                 )
                                 safe_ui(progress_bar_inner.style, "width: 2%")
                             elif task.id in global_task_manager.active_tasks:
@@ -388,9 +474,15 @@ class DocxToPdfModule(BaseModule):
                         except Exception:
                             pass
 
-                        download_url = (
-                            f"{self.router.prefix}/download/{file_id}/{output_name}"
-                        )
+                        # 生成下载 token
+                        download_token = self._generate_token(client_ip, file_id)
+                        self._download_tokens[f"{file_id}:{output_name}"] = {
+                            "token": download_token,
+                            "ip": client_ip,
+                            "created_at": time.time(),
+                        }
+
+                        download_url = f"{self.router.prefix}/download/{file_id}/{output_name}?token_dlDL={download_token}"
 
                         try:
                             result_card.clear()
@@ -440,7 +532,7 @@ class DocxToPdfModule(BaseModule):
                         pass
                     show_error_report(str(ex))
                 finally:
-                    if 'task' in locals():
+                    if "task" in locals():
                         await global_task_manager.complete_task(task.id)
                     state["processing"] = False
                     safe_ui(convert_btn.enable)
