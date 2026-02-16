@@ -9,7 +9,6 @@ from app.modules.base import BaseModule
 from nicegui import ui, app
 from fastapi import Request
 from fastapi.responses import FileResponse, JSONResponse
-from starlette.requests import Request
 
 
 class DocxToPdfModule(BaseModule):
