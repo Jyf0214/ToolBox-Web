@@ -380,14 +380,16 @@ class ArchiveToPdfModule(BaseModule):
                         ui.label(f"已选择 {len(state['files'])} 个文件:").classes(
                             "text-sm font-bold mb-2"
                         )
-                        for i, f in enumerate(state["files"][:5]):
+                        for f in state["files"][:5]:
                             with ui.row().classes(
                                 "w-full items-center justify-between"
                             ):
-                                ui.label(f"{i + 1}. {f['name']}").classes("text-sm")
+                                ui.label(f"● {f['name']}").classes("text-sm")
                                 ui.button(
                                     icon="close",
-                                    on_click=lambda idx=i: remove_file(idx),
+                                    on_click=lambda target_file=f: remove_file(
+                                        target_file
+                                    ),
                                 ).props("flat dense size=sm")
                         if len(state["files"]) > 5:
                             ui.label(
@@ -397,9 +399,10 @@ class ArchiveToPdfModule(BaseModule):
                     has_files["value"] = False
                 convert_btn.enabled = has_files["value"] and not state["processing"]
 
-            def remove_file(idx: int):
-                state["files"].pop(idx)
-                update_file_list()
+            def remove_file(target_file):
+                if target_file in state["files"]:
+                    state["files"].remove(target_file)
+                    update_file_list()
 
             async def handle_upload(e):
                 try:
@@ -448,6 +451,17 @@ class ArchiveToPdfModule(BaseModule):
                 from app.core.task_manager import global_task_manager
                 from app.core.auth import is_authenticated, verify_turnstile
 
+                # 定义一个内部函数来安全更新 UI
+                def safe_ui(func, *args, **kwargs):
+                    try:
+                        func(*args, **kwargs)
+                    except RuntimeError as e:
+                        if "deleted" in str(e).lower() or "parent slot" in str(e).lower():
+                            return
+                        raise
+                    except Exception:
+                        pass
+
                 if (
                     security_state["requires_captcha"]
                     and security_state["site_key"]
@@ -472,7 +486,7 @@ class ArchiveToPdfModule(BaseModule):
                 client_ip = app.storage.browser.get("id", "Anonymous")
 
                 state["processing"] = True
-                convert_btn.disable()
+                safe_ui(convert_btn.disable)
 
                 task = await global_task_manager.add_task(
                     name="压缩包文档转PDF",
@@ -481,10 +495,10 @@ class ArchiveToPdfModule(BaseModule):
                     filename=", ".join([f["name"] for f in state["files"]]),
                 )
 
-                status_label.set_visibility(True)
-                progress_bar.set_visibility(True)
-                progress_bar.props("color=orange")
-                result_card.set_visibility(False)
+                safe_ui(status_label.set_visibility, True)
+                safe_ui(progress_bar.set_visibility, True)
+                safe_ui(progress_bar.props, "color=orange")
+                safe_ui(result_card.set_visibility, False)
 
                 # 进度信息共享字典
                 progress_info = {"current": 0, "total": 0}
@@ -498,22 +512,20 @@ class ArchiveToPdfModule(BaseModule):
                             # 限制最大 99%，给打包预留空间
                             if p > 0.99:
                                 p = 0.99
-                            try:
-                                progress_bar.set_value(p)
-                                status_label.set_text(
-                                    f"正在转换... ({progress_info['current']}/{progress_info['total']})"
-                                )
-                            except Exception:
-                                pass
+                            safe_ui(progress_bar.set_value, p)
+                            safe_ui(
+                                status_label.set_text,
+                                f"正在转换... ({progress_info['current']}/{progress_info['total']})",
+                            )
                         else:
                             # 模拟进度模式（单文件或初始化阶段）
-                            current_val = progress_bar.value
-                            if current_val < 0.95:
-                                increment = (0.98 - current_val) / 20
-                                try:
-                                    progress_bar.set_value(current_val + increment)
-                                except Exception:
-                                    pass
+                            try:
+                                current_val = progress_bar.value
+                                if current_val < 0.95:
+                                    increment = (0.98 - current_val) / 20
+                                    safe_ui(progress_bar.set_value, current_val + increment)
+                            except Exception:
+                                pass
                         await asyncio.sleep(0.5)
 
                 asyncio.create_task(monitor_progress())
@@ -523,8 +535,10 @@ class ArchiveToPdfModule(BaseModule):
                         waiting_ids = [t.id for t in global_task_manager.queue]
                         if task.id in waiting_ids:
                             pos = waiting_ids.index(task.id) + 1
-                            status_label.set_text(f"排队中: 前方有 {pos - 1} 个任务...")
-                            progress_bar.set_value(0.02)
+                            safe_ui(
+                                status_label.set_text, f"排队中: 前方有 {pos - 1} 个任务..."
+                            )
+                            safe_ui(progress_bar.set_value, 0.02)
                         else:
                             if task.id in global_task_manager.active_tasks:
                                 break
@@ -549,11 +563,11 @@ class ArchiveToPdfModule(BaseModule):
                         files_to_process.append((file_path, f["name"]))
 
                     if is_batch:
-                        status_label.set_text("正在处理文件...")
+                        safe_ui(status_label.set_text, "正在处理文件...")
 
                         temp_input = input_dir
                         if any(f[1].lower().endswith(".zip") for f in files_to_process):
-                            status_label.set_text("正在解压压缩包...")
+                            safe_ui(status_label.set_text, "正在解压压缩包...")
                             for file_path, file_name in files_to_process:
                                 if file_name.lower().endswith(".zip"):
                                     self._extract_archive(file_path, temp_input)
@@ -570,7 +584,7 @@ class ArchiveToPdfModule(BaseModule):
                         if total_files == 0:
                             raise Exception("没有找到可转换的文档")
 
-                        status_label.set_text(f"准备转换 {total_files} 个文件...")
+                        safe_ui(status_label.set_text, f"准备转换 {total_files} 个文件...")
 
                         (
                             success_count,
@@ -583,7 +597,7 @@ class ArchiveToPdfModule(BaseModule):
                             progress_info,
                         )
 
-                        status_label.set_text("正在打包结果...")
+                        safe_ui(status_label.set_text, "正在打包结果...")
 
                         output_zip_name = "converted_files.zip"
                         output_zip_path = os.path.join(work_dir, output_zip_name)
@@ -594,10 +608,13 @@ class ArchiveToPdfModule(BaseModule):
                         shutil.rmtree(temp_input, ignore_errors=True)
 
                         state["processing"] = False
-                        progress_bar.set_value(1.0)
-                        progress_bar.props("color=green")
-                        status_label.set_text("处理完成！")
-                        ui.notify("转换成功！", color="positive")
+                        safe_ui(progress_bar.set_value, 1.0)
+                        safe_ui(progress_bar.props, "color=green")
+                        safe_ui(status_label.set_text, "处理完成！")
+                        try:
+                            ui.notify("转换成功！", color="positive")
+                        except Exception:
+                            pass
 
                         download_token = self._generate_token(client_ip, file_id)
                         self._download_tokens[f"{file_id}:{output_zip_name}"] = {
@@ -608,27 +625,30 @@ class ArchiveToPdfModule(BaseModule):
 
                         download_url = f"{self.router.prefix}/download/{file_id}/{output_zip_name}?token_dlDL={download_token}"
 
-                        result_card.clear()
-                        result_card.set_visibility(True)
-                        with result_card:
-                            with ui.row().classes(
-                                "w-full items-center justify-between"
-                            ):
-                                with ui.column():
-                                    ui.label(output_zip_name).classes(
-                                        "font-bold text-lg"
-                                    )
-                                    ui.label(
-                                        f"成功转换 {success_count}/{total_count} 个文档"
-                                    ).classes("text-sm text-slate-500")
+                        try:
+                            result_card.clear()
+                            result_card.set_visibility(True)
+                            with result_card:
+                                with ui.row().classes(
+                                    "w-full items-center justify-between"
+                                ):
+                                    with ui.column():
+                                        ui.label(output_zip_name).classes(
+                                            "font-bold text-lg"
+                                        )
+                                        ui.label(
+                                            f"成功转换 {success_count}/{total_count} 个文档"
+                                        ).classes("text-sm text-slate-500")
 
-                                ui.button(
-                                    "下载结果",
-                                    icon="download",
-                                    on_click=lambda: ui.download(download_url),
-                                ).props("color=primary")
+                                    ui.button(
+                                        "下载结果",
+                                        icon="download",
+                                        on_click=lambda: ui.download(download_url),
+                                    ).props("color=primary")
+                        except Exception:
+                            pass
                     else:
-                        status_label.set_text("正在转换文档...")
+                        safe_ui(status_label.set_text, "正在转换文档...")
 
                         single_file_path, single_file_name = files_to_process[0]
                         result_pdf = None
@@ -648,10 +668,13 @@ class ArchiveToPdfModule(BaseModule):
                         pdf_name = os.path.basename(result_pdf)
 
                         state["processing"] = False
-                        progress_bar.set_value(1.0)
-                        progress_bar.props("color=green")
-                        status_label.set_text("转换完成！")
-                        ui.notify("转换成功！", color="positive")
+                        safe_ui(progress_bar.set_value, 1.0)
+                        safe_ui(progress_bar.props, "color=green")
+                        safe_ui(status_label.set_text, "转换完成！")
+                        try:
+                            ui.notify("转换成功！", color="positive")
+                        except Exception:
+                            pass
 
                         download_token = self._generate_token(client_ip, file_id)
                         self._download_tokens[f"{file_id}:{pdf_name}"] = {
@@ -662,32 +685,38 @@ class ArchiveToPdfModule(BaseModule):
 
                         download_url = f"{self.router.prefix}/download/{file_id}/{pdf_name}?token_dlDL={download_token}"
 
-                        result_card.clear()
-                        result_card.set_visibility(True)
-                        with result_card:
-                            with ui.row().classes(
-                                "w-full items-center justify-between"
-                            ):
-                                with ui.column():
-                                    ui.label(pdf_name).classes("font-bold text-lg")
-                                    ui.label("文档转换完成").classes(
-                                        "text-sm text-slate-500"
-                                    )
+                        try:
+                            result_card.clear()
+                            result_card.set_visibility(True)
+                            with result_card:
+                                with ui.row().classes(
+                                    "w-full items-center justify-between"
+                                ):
+                                    with ui.column():
+                                        ui.label(pdf_name).classes("font-bold text-lg")
+                                        ui.label("文档转换完成").classes(
+                                            "text-sm text-slate-500"
+                                        )
 
-                                ui.button(
-                                    "下载PDF",
-                                    icon="download",
-                                    on_click=lambda: ui.download(download_url),
-                                ).props("color=primary")
+                                    ui.button(
+                                        "下载PDF",
+                                        icon="download",
+                                        on_click=lambda: ui.download(download_url),
+                                    ).props("color=primary")
+                        except Exception:
+                            pass
 
                 except Exception as ex:
                     error_msg = str(ex)
-                    ui.notify("处理失败", color="negative")
+                    try:
+                        ui.notify("处理失败", color="negative")
+                    except Exception:
+                        pass
                     show_error_report(error_msg)
                 finally:
                     await global_task_manager.complete_task(task.id)
                     state["processing"] = False
-                    convert_btn.enabled = has_files["value"]
+                    safe_ui(convert_btn.enable)
 
             convert_btn = ui.button("开始转换", on_click=convert).classes(
                 "w-full mt-2 py-4 text-lg"
