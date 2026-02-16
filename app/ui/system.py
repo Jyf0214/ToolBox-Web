@@ -32,8 +32,6 @@ async def render_system_status(state):
 
     @ui.refreshable
     async def history_list():
-        if history_list._is_deleted:
-            return
         if not state.db_connected:
             return
         async with database.AsyncSessionLocal() as s:
@@ -58,8 +56,12 @@ async def render_system_status(state):
     await history_list()
 
     def safe_refresh_history():
-        if not history_list._is_deleted:
+        try:
             history_list.refresh()
+        except RuntimeError as e:
+            if "parent slot" in str(e):
+                return
+            raise
 
     ui.timer(5.0, safe_refresh_history)
 
@@ -147,8 +149,6 @@ def render_queue():
 
     @ui.refreshable
     def q_list():
-        if q_list._is_deleted:
-            return
         active = list(global_task_manager.active_tasks.values())
         waiting = global_task_manager.queue
         with ui.card().classes("w-full p-4 shadow-sm border"):
@@ -167,7 +167,11 @@ def render_queue():
     q_list()
 
     def safe_refresh_q():
-        if not q_list._is_deleted:
+        try:
             q_list.refresh()
+        except RuntimeError as e:
+            if "parent slot" in str(e):
+                return
+            raise
 
     ui.timer(2.0, safe_refresh_q)

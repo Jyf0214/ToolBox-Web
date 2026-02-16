@@ -55,8 +55,6 @@ def create_main_page(state, modules):
 
                     @ui.refreshable
                     def queue_status_ui():
-                        if queue_status_ui._is_deleted:
-                            return
                         status = global_task_manager.get_status()
                         with ui.row().classes(
                             "items-center bg-slate-700 rounded-full px-3 py-1 gap-2 border border-slate-600"
@@ -83,8 +81,12 @@ def create_main_page(state, modules):
                     queue_status_ui()
 
                     def safe_refresh():
-                        if not queue_status_ui._is_deleted:
+                        try:
                             queue_status_ui.refresh()
+                        except RuntimeError as e:
+                            if "parent slot" in str(e):
+                                return
+                            raise
 
                     ui.timer(3.0, safe_refresh)
 

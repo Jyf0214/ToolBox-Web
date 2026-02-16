@@ -1,3 +1,4 @@
+import asyncio
 from nicegui import ui, app
 from fastapi import Request
 from sqlalchemy import select, func
@@ -213,8 +214,6 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                         with sections[name]:
                             ui.label(f"{name} 加载失败: {e}").classes("text-negative")
                         return True
-
-                import asyncio
 
                 if not await run_section("dashboard", lambda: render_dashboard(state)):
                     return
