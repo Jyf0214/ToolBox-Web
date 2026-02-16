@@ -224,7 +224,7 @@ class MdToPdfModule(BaseModule):
                     }
 
                     state["pdf_id"] = file_id
-                    download_url = f"{self.router.prefix}/download/{file_id}?token_dlDL={download_token}"
+                    download_url = f"{self.router.prefix}/download/{file_id}?token={download_token}"
 
                     result_card.set_visibility(True)
                     with result_card:

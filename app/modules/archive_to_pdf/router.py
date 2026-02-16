@@ -913,7 +913,7 @@ class ArchiveToPdfModule(BaseModule):
                             "created_at": time.time(),
                         }
 
-                        download_url = f"{self.router.prefix}/download/{file_id}/{output_zip_name}?token_dlDL={download_token}"
+                        download_url = f"{self.router.prefix}/download/{file_id}/{output_zip_name}?token={download_token}"
 
                         try:
                             result_card.clear()
@@ -983,7 +983,7 @@ class ArchiveToPdfModule(BaseModule):
                             "created_at": time.time(),
                         }
 
-                        download_url = f"{self.router.prefix}/download/{file_id}/{pdf_name}?token_dlDL={download_token}"
+                        download_url = f"{self.router.prefix}/download/{file_id}/{pdf_name}?token={download_token}"
 
                         try:
                             result_card.clear()
