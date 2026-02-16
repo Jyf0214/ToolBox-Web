@@ -625,8 +625,14 @@ class ArchiveToPdfModule(BaseModule):
 
                         safe_ui(status_label.set_text, "正在打包结果...")
 
-                        # 多个文件转换时，使用固定名称作为输出压缩包名
-                        output_zip_name = "ToolBox_Converted.zip"
+                        # 确定输出压缩包名称逻辑
+                        if len(state["files"]) == 1 and original_input_name.lower().endswith(".zip"):
+                            # 如果用户原本只上传了一个压缩包，保留原压缩包名称
+                            output_zip_name = original_input_name
+                        else:
+                            # 如果是多个独立文档批量上传，则使用固定名称
+                            output_zip_name = "ToolBox_Converted.zip"
+                            
                         output_zip_path = os.path.join(work_dir, output_zip_name)
 
                         if not self._create_archive(output_dir, output_zip_path):
