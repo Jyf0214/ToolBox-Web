@@ -61,28 +61,42 @@ class TaskManager:
 
     async def start_task(self, task_id: str):
         """
-        请求开始执行任务。该方法会阻塞，直到任务被移入 active_tasks 列表。
+        请求开始执行任务。
+        管理员任务 (admin) 将跳过限制立即执行。
+        普通任务 (guest) 需等待队列顺序和并发限制。
         """
         async with self._condition:
             while True:
                 async with self._lock:
-                    waiting_ids = [t.id for t in self.queue]
-                    if task_id in waiting_ids:
-                        index = waiting_ids.index(task_id)
-                        # 如果当前活跃任务数未达上限，且该任务处于可执行位置
+                    # 获取当前任务对象
+                    task = next((t for t in self.queue if t.id == task_id), None)
+                    
+                    if task:
+                        index = self.queue.index(task)
+                        # 如果是管理员任务，立即执行
+                        if task.user_type == "admin":
+                            self.queue.pop(index)
+                            task.status = "processing"
+                            task.started_at = datetime.utcnow()
+                            self.active_tasks[task.id] = task
+                            print(f"[Queue] 管理员任务立即开始: {task.id}")
+                            return task
+                        
+                        # 如果是普通任务，检查并发限制和队列顺序
                         if len(self.active_tasks) < self.max_concurrent_tasks:
-                            # 简单起见，按队列顺序执行
-                            if index == 0: 
-                                task = self.queue.pop(index)
+                            # 仅当处于队列首位（或前方全是管理员任务已被处理）时执行
+                            if index == 0:
+                                self.queue.pop(index)
                                 task.status = "processing"
                                 task.started_at = datetime.utcnow()
                                 self.active_tasks[task.id] = task
-                                print(f"[Queue] 任务开始执行: {task.id}")
+                                print(f"[Queue] 普通任务开始执行: {task.id}")
                                 return task
                     elif task_id in self.active_tasks:
+                        # 任务已经在执行中
                         return self.active_tasks[task_id]
                 
-                # 等待 complete_task 或 add_task 的通知
+                # 等待通知
                 await self._condition.wait()
 
     async def complete_task(
