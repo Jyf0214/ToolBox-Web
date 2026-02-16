@@ -58,11 +58,6 @@ class MdToPdfModule(BaseModule):
     def setup_api(self):
         @app.get(f"{self.router.prefix}/download/{{file_id}}")
         async def download_md_pdf(request: Request, file_id: str, token: str = None):
-            headers = request.headers
-            # 深度头部校验：确保请求是由真实的浏览器下载行为触发的
-            if headers.get("sec-fetch-site") == "none":
-                return JSONResponse(status_code=403, content={"error": "禁止直接访问"})
-
             client_ip = request.client.host
             if "x-forwarded-for" in request.headers:
                 client_ip = request.headers["x-forwarded-for"].split(",")[0]
@@ -220,64 +215,10 @@ class MdToPdfModule(BaseModule):
                         result_card.clear()
                         ui.label("转换成功！").classes("text-green-600 font-bold mb-2")
 
-                        async def handle_download_md():
-                            try:
-                                result = await ui.run_javascript(
-                                    f'''
-                                    async function downloadFile() {{
-                                        try {{
-                                            const response = await fetch("{download_url}", {{
-                                                method: 'GET',
-                                                credentials: 'same-origin'
-                                            }});
-                                            if (!response.ok) {{
-                                                const errorData = await response.json().catch(() => {{}});
-                                                return {{
-                                                    success: false,
-                                                    status: response.status,
-                                                    error: errorData.error || '下载失败',
-                                                    reason: errorData.reason || 'unknown'
-                                                }};
-                                            }}
-                                            const blob = await response.blob();
-                                            const url = window.URL.createObjectURL(blob);
-                                            const a = document.createElement('a');
-                                            a.href = url;
-                                            a.download = "Markdown转换结果.pdf";
-                                            document.body.appendChild(a);
-                                            a.click();
-                                            window.URL.revokeObjectURL(url);
-                                            document.body.removeChild(a);
-                                            return {{ success: true }};
-                                        }} catch (e) {{
-                                            return {{
-                                                success: false,
-                                                error: e.message || '网络请求失败'
-                                            }};
-                                        }}
-                                    }}
-                                    return await downloadFile();
-                                    '''
-                                )
-                                if not result.get("success"):
-                                    error_msg = f"下载失败 ({result.get('status', '未知')}): {result.get('error', '未知错误')}"
-                                    if result.get("reason"):
-                                        error_msg += f"\n原因: {result['reason']}"
-                                    ui.notify(
-                                        error_msg, color="negative", multi_line=True
-                                    )
-                                    show_error_report(error_msg)
-                                else:
-                                    ui.notify("下载已开始", color="positive")
-                            except Exception as e:
-                                error_msg = f"下载出错: {str(e)}"
-                                ui.notify(error_msg, color="negative")
-                                show_error_report(error_msg)
-
                         with ui.row().classes("gap-4"):
                             ui.button(
                                 "下载 PDF",
-                                on_click=handle_download_md,
+                                on_click=lambda: ui.download(download_url),
                             ).props("icon=download")
                             ui.button(
                                 "预览",

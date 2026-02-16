@@ -8,7 +8,7 @@ import hashlib
 import time
 from pathlib import Path
 from typing import Tuple, List
-from multiprocessing import Pool
+from multiprocessing import Pool, Manager
 from app.modules.base import BaseModule
 from nicegui import ui, app
 from fastapi.responses import FileResponse, JSONResponse
@@ -17,7 +17,7 @@ from starlette.requests import Request
 
 def _convert_single_file(args):
     """静态方法：处理单个文件（用于多进程）"""
-    file_path, file_name, output_dir = args
+    file_path, file_name, output_dir, progress_queue = args
     file_lower = file_name.lower()
 
     try:
@@ -45,8 +45,12 @@ def _convert_single_file(args):
             )
 
             if result.returncode == 0 and os.path.exists(output_pdf):
+                if progress_queue is not None:
+                    progress_queue.put(1)
                 return ("success", file_name)
             else:
+                if progress_queue is not None:
+                    progress_queue.put(1)
                 return ("failed", file_name)
 
         elif file_lower.endswith(".md"):
@@ -95,17 +99,25 @@ def _convert_single_file(args):
             doc.build(story)
 
             if os.path.exists(output_pdf):
+                if progress_queue is not None:
+                    progress_queue.put(1)
                 return ("success", file_name)
             else:
+                if progress_queue is not None:
+                    progress_queue.put(1)
                 return ("failed", file_name)
 
         else:
             # 复制非转换文件
             dest_path = os.path.join(output_dir, file_name)
             shutil.copy2(file_path, dest_path)
+            if progress_queue is not None:
+                progress_queue.put(1)
             return ("copied", file_name)
     except Exception as e:
         print(f"处理文件失败 {file_name}: {e}")
+        if progress_queue is not None:
+            progress_queue.put(1)
         return ("failed", file_name)
 
 
@@ -163,12 +175,6 @@ class ArchiveToPdfModule(BaseModule):
         async def download_archive(
             request: Request, file_id: str, file_name: str, token: str = None
         ):
-            headers = request.headers
-            # 深度头部校验：确保请求是由真实的浏览器下载行为触发的
-            # Sec-Fetch-Dest 通常为 'iframe' 或 'document'
-            if headers.get("sec-fetch-site") == "none":
-                return JSONResponse(status_code=403, content={"error": "禁止直接访问"})
-
             client_ip = request.client.host
             if "x-forwarded-for" in request.headers:
                 client_ip = request.headers["x-forwarded-for"].split(",")[0]
@@ -396,18 +402,38 @@ class ArchiveToPdfModule(BaseModule):
         total_count = len(files_to_process)
         success_count = 0
 
+        # 使用Manager创建共享队列用于进度跟踪
+        manager = Manager()
+        progress_queue = manager.Queue()
+
+        # 准备带队列参数的任务列表
+        tasks_with_queue = [
+            (fp, fn, od, progress_queue) for fp, fn, od in files_to_process
+        ]
+
         # 使用5个进程并行处理
         with Pool(processes=5) as pool:
-            # 使用imap_unordered实时获取结果
-            for result in pool.imap_unordered(_convert_single_file, files_to_process):
-                status, file_name = result
+            # 启动异步任务
+            result_async = pool.map_async(_convert_single_file, tasks_with_queue)
 
+            # 监控进度
+            completed = 0
+            while not result_async.ready() or completed < total_count:
+                try:
+                    # 非阻塞获取进度更新
+                    progress_queue.get(timeout=0.1)
+                    completed += 1
+                    if progress_info is not None:
+                        progress_info["current"] = completed
+                except Exception:
+                    # 队列为空，继续检查
+                    pass
+
+            # 获取所有结果
+            results = result_async.get()
+            for status, file_name in results:
                 if status == "success":
                     success_count += 1
-
-                # 更新进度
-                if progress_info is not None:
-                    progress_info["current"] += 1
 
         return success_count, total_count
 
@@ -805,60 +831,6 @@ class ArchiveToPdfModule(BaseModule):
 
                         download_url = f"{self.router.prefix}/download/{file_id}/{output_zip_name}?token_dlDL={download_token}"
 
-                        async def handle_download_archive():
-                            try:
-                                result = await ui.run_javascript(
-                                    f'''
-                                    async function downloadFile() {{
-                                        try {{
-                                            const response = await fetch("{download_url}", {{
-                                                method: 'GET',
-                                                credentials: 'same-origin'
-                                            }});
-                                            if (!response.ok) {{
-                                                const errorData = await response.json().catch(() => {{}});
-                                                return {{
-                                                    success: false,
-                                                    status: response.status,
-                                                    error: errorData.error || '下载失败',
-                                                    reason: errorData.reason || 'unknown'
-                                                }};
-                                            }}
-                                            const blob = await response.blob();
-                                            const url = window.URL.createObjectURL(blob);
-                                            const a = document.createElement('a');
-                                            a.href = url;
-                                            a.download = "{output_zip_name}";
-                                            document.body.appendChild(a);
-                                            a.click();
-                                            window.URL.revokeObjectURL(url);
-                                            document.body.removeChild(a);
-                                            return {{ success: true }};
-                                        }} catch (e) {{
-                                            return {{
-                                                success: false,
-                                                error: e.message || '网络请求失败'
-                                            }};
-                                        }}
-                                    }}
-                                    return await downloadFile();
-                                    '''
-                                )
-                                if not result.get("success"):
-                                    error_msg = f"下载失败 ({result.get('status', '未知')}): {result.get('error', '未知错误')}"
-                                    if result.get("reason"):
-                                        error_msg += f"\n原因: {result['reason']}"
-                                    ui.notify(
-                                        error_msg, color="negative", multi_line=True
-                                    )
-                                    show_error_report(error_msg)
-                                else:
-                                    ui.notify("下载已开始", color="positive")
-                            except Exception as e:
-                                error_msg = f"下载出错: {str(e)}"
-                                ui.notify(error_msg, color="negative")
-                                show_error_report(error_msg)
-
                         try:
                             result_card.clear()
                             result_card.set_visibility(True)
@@ -877,7 +849,7 @@ class ArchiveToPdfModule(BaseModule):
                                     ui.button(
                                         "下载结果",
                                         icon="download",
-                                        on_click=handle_download_archive,
+                                        on_click=lambda: ui.download(download_url),
                                     ).props("color=primary")
                         except Exception:
                             pass
@@ -927,60 +899,6 @@ class ArchiveToPdfModule(BaseModule):
 
                         download_url = f"{self.router.prefix}/download/{file_id}/{pdf_name}?token_dlDL={download_token}"
 
-                        async def handle_download_single():
-                            try:
-                                result = await ui.run_javascript(
-                                    f'''
-                                    async function downloadFile() {{
-                                        try {{
-                                            const response = await fetch("{download_url}", {{
-                                                method: 'GET',
-                                                credentials: 'same-origin'
-                                            }});
-                                            if (!response.ok) {{
-                                                const errorData = await response.json().catch(() => {{}});
-                                                return {{
-                                                    success: false,
-                                                    status: response.status,
-                                                    error: errorData.error || '下载失败',
-                                                    reason: errorData.reason || 'unknown'
-                                                }};
-                                            }}
-                                            const blob = await response.blob();
-                                            const url = window.URL.createObjectURL(blob);
-                                            const a = document.createElement('a');
-                                            a.href = url;
-                                            a.download = "{pdf_name}";
-                                            document.body.appendChild(a);
-                                            a.click();
-                                            window.URL.revokeObjectURL(url);
-                                            document.body.removeChild(a);
-                                            return {{ success: true }};
-                                        }} catch (e) {{
-                                            return {{
-                                                success: false,
-                                                error: e.message || '网络请求失败'
-                                            }};
-                                        }}
-                                    }}
-                                    return await downloadFile();
-                                    '''
-                                )
-                                if not result.get("success"):
-                                    error_msg = f"下载失败 ({result.get('status', '未知')}): {result.get('error', '未知错误')}"
-                                    if result.get("reason"):
-                                        error_msg += f"\n原因: {result['reason']}"
-                                    ui.notify(
-                                        error_msg, color="negative", multi_line=True
-                                    )
-                                    show_error_report(error_msg)
-                                else:
-                                    ui.notify("下载已开始", color="positive")
-                            except Exception as e:
-                                error_msg = f"下载出错: {str(e)}"
-                                ui.notify(error_msg, color="negative")
-                                show_error_report(error_msg)
-
                         try:
                             result_card.clear()
                             result_card.set_visibility(True)
@@ -997,7 +915,7 @@ class ArchiveToPdfModule(BaseModule):
                                     ui.button(
                                         "下载PDF",
                                         icon="download",
-                                        on_click=handle_download_single,
+                                        on_click=lambda: ui.download(download_url),
                                     ).props("color=primary")
                         except Exception:
                             pass
