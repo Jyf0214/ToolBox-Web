@@ -7,11 +7,106 @@ import secrets
 import hashlib
 import time
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, List
+from multiprocessing import Pool
 from app.modules.base import BaseModule
 from nicegui import ui, app
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.requests import Request
+
+
+def _convert_single_file(args):
+    """静态方法：处理单个文件（用于多进程）"""
+    file_path, file_name, output_dir = args
+    file_lower = file_name.lower()
+
+    try:
+        if file_lower.endswith(".docx"):
+            # 导入并转换 docx
+            import subprocess
+
+            file_stem = Path(file_name).stem
+            output_pdf = os.path.join(output_dir, f"{file_stem}.pdf")
+
+            libreoffice_path = shutil.which("libreoffice") or "/usr/bin/libreoffice"
+
+            result = subprocess.run(
+                [
+                    libreoffice_path,
+                    "--headless",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    output_dir,
+                    file_path,
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            if result.returncode == 0 and os.path.exists(output_pdf):
+                return ("success", file_name)
+            else:
+                return ("failed", file_name)
+
+        elif file_lower.endswith(".md"):
+            # 转换 md
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+            import markdown
+            import re
+
+            file_stem = Path(file_name).stem
+            output_pdf = os.path.join(output_dir, f"{file_stem}.pdf")
+
+            with open(file_path, "r", encoding="utf-8") as f:
+                md_content = f.read()
+
+            doc = SimpleDocTemplate(output_pdf, pagesize=A4)
+            styles = getSampleStyleSheet()
+            story = []
+
+            lines = md_content.split("\n")
+            for line in lines:
+                if not line.strip():
+                    story.append(Spacer(1, 12))
+                    continue
+
+                style = styles["Normal"]
+                if line.startswith("# "):
+                    style = styles["Heading1"]
+                    line = line[2:]
+                elif line.startswith("## "):
+                    style = styles["Heading2"]
+                    line = line[3:]
+                elif line.startswith("### "):
+                    style = styles["Heading3"]
+                    line = line[4:]
+
+                html_line = markdown.markdown(line)
+                clean_line = re.sub("<[^>]*>", "", html_line)
+
+                try:
+                    story.append(Paragraph(clean_line, style))
+                except Exception:
+                    story.append(Paragraph(line, style))
+
+            doc.build(story)
+
+            if os.path.exists(output_pdf):
+                return ("success", file_name)
+            else:
+                return ("failed", file_name)
+
+        else:
+            # 复制非转换文件
+            dest_path = os.path.join(output_dir, file_name)
+            shutil.copy2(file_path, dest_path)
+            return ("copied", file_name)
+    except Exception as e:
+        print(f"处理文件失败 {file_name}: {e}")
+        return ("failed", file_name)
 
 
 class ArchiveToPdfModule(BaseModule):
@@ -266,14 +361,16 @@ class ArchiveToPdfModule(BaseModule):
         self, input_dir: str, output_dir: str, progress_info: dict = None
     ) -> Tuple[int, int]:
         """
-        递归处理目录中的所有文档
+        递归处理目录中的所有文档（使用5进程并行处理）
         :param input_dir: 输入目录
         :param output_dir: 输出目录
         :param progress_info: 进度信息字典 {'current': 0, 'total': 0}
         :return: (成功转换数, 总文件数)
         """
-        success_count = 0
-        total_count = 0
+        # 收集所有需要处理的文件
+        files_to_process: List[
+            Tuple[str, str, str]
+        ] = []  # (file_path, file_name, output_dir)
 
         for root, dirs, files in os.walk(input_dir):
             # 计算相对路径
@@ -288,29 +385,25 @@ class ArchiveToPdfModule(BaseModule):
             os.makedirs(current_output_dir, exist_ok=True)
 
             for file in files:
-                file_lower = file.lower()
                 file_path = os.path.join(root, file)
 
-                # 复制非转换文件
-                if not (file_lower.endswith(".docx") or file_lower.endswith(".md")):
-                    dest_path = os.path.join(current_output_dir, file)
-                    try:
-                        shutil.copy2(file_path, dest_path)
-                    except Exception as e:
-                        print(f"复制文件失败 {file}: {e}")
-                    continue
+                # 复制非转换文件也放入处理队列
+                files_to_process.append((file_path, file, current_output_dir))
 
-                total_count += 1
+        if not files_to_process:
+            return 0, 0
 
-                # 转换文件
-                if file_lower.endswith(".docx"):
-                    result = self._convert_docx_to_pdf(file_path, current_output_dir)
-                    if result:
-                        success_count += 1
-                elif file_lower.endswith(".md"):
-                    result = self._convert_md_to_pdf(file_path, current_output_dir)
-                    if result:
-                        success_count += 1
+        total_count = len(files_to_process)
+        success_count = 0
+
+        # 使用5个进程并行处理
+        with Pool(processes=5) as pool:
+            # 使用imap_unordered实时获取结果
+            for result in pool.imap_unordered(_convert_single_file, files_to_process):
+                status, file_name = result
+
+                if status == "success":
+                    success_count += 1
 
                 # 更新进度
                 if progress_info is not None:
