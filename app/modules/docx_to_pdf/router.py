@@ -297,19 +297,25 @@ class DocxToPdfModule(BaseModule):
 
                     asyncio.create_task(simulate_fake_progress())
 
-                    while True:
-                        waiting_ids = [t.id for t in global_task_manager.queue]
-                        if task.id in waiting_ids:
-                            pos = waiting_ids.index(task.id) + 1
-                            safe_ui(
-                                status_label.set_text, f"排队中: 前方有 {pos - 1} 个任务..."
-                            )
-                            safe_ui(progress_bar_inner.style, "width: 2%")
-                        else:
-                            if task.id in global_task_manager.active_tasks:
+                    async def wait_for_start():
+                        while True:
+                            waiting_ids = [t.id for t in global_task_manager.queue]
+                            if task.id in waiting_ids:
+                                pos = waiting_ids.index(task.id) + 1
+                                safe_ui(
+                                    status_label.set_text, f"排队中: 前方有 {pos - 1} 个任务..."
+                                )
+                                safe_ui(progress_bar_inner.style, "width: 2%")
+                            elif task.id in global_task_manager.active_tasks:
                                 break
+                            await asyncio.sleep(1.0)
+
+                    # 启动状态监控并请求开始任务
+                    monitor_task = asyncio.create_task(wait_for_start())
+                    try:
                         await global_task_manager.start_task(task.id)
-                        break
+                    finally:
+                        monitor_task.cancel()
 
                     safe_ui(status_label.set_text, "正在转换 (LibreOffice 渲染中)...")
 

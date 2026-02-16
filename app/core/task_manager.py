@@ -52,22 +52,37 @@ class TaskManager:
         task = Task(name=name, user_type=user_type, ip=ip, filename=filename)
         async with self._lock:
             self.queue.append(task)
-            print(f"[Queue] Task added: {task.id}")
+            print(f"[Queue] 任务已添加: {task.id}")
+        
+        # 唤醒正在等待 start_task 的协程
+        async with self._condition:
+            self._condition.notify_all()
         return task
 
     async def start_task(self, task_id: str):
+        """
+        请求开始执行任务。该方法会阻塞，直到任务被移入 active_tasks 列表。
+        """
         async with self._condition:
             while True:
                 async with self._lock:
                     waiting_ids = [t.id for t in self.queue]
                     if task_id in waiting_ids:
                         index = waiting_ids.index(task_id)
-                        if index < (self.max_concurrent_tasks - len(self.active_tasks)):
-                            task = self.queue.pop(index)
-                            task.status = "processing"
-                            task.started_at = datetime.utcnow()
-                            self.active_tasks[task.id] = task
-                            return task
+                        # 如果当前活跃任务数未达上限，且该任务处于可执行位置
+                        if len(self.active_tasks) < self.max_concurrent_tasks:
+                            # 简单起见，按队列顺序执行
+                            if index == 0: 
+                                task = self.queue.pop(index)
+                                task.status = "processing"
+                                task.started_at = datetime.utcnow()
+                                self.active_tasks[task.id] = task
+                                print(f"[Queue] 任务开始执行: {task.id}")
+                                return task
+                    elif task_id in self.active_tasks:
+                        return self.active_tasks[task_id]
+                
+                # 等待 complete_task 或 add_task 的通知
                 await self._condition.wait()
 
     async def complete_task(
