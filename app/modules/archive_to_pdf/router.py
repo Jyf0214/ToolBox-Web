@@ -299,6 +299,22 @@ class ArchiveToPdfModule(BaseModule):
             "支持批量上传 .zip、.docx、.md 文件，自动转换为 PDF。压缩包会保持文件夹结构。"
         ).classes("mb-4 text-slate-500")
 
+        # 定义一个内部函数来安全更新 UI，并打印非生命周期错误
+        def safe_ui(func, *args, **kwargs):
+            try:
+                func(*args, **kwargs)
+            except RuntimeError as e:
+                # 忽略元素已删除的错误
+                if (
+                    "deleted" in str(e).lower()
+                    or "parent slot" in str(e).lower()
+                    or "client" in str(e).lower()
+                ):
+                    return
+                print(f"UI Update Runtime Error: {e}")
+            except Exception as e:
+                print(f"UI Update Error: {e}")
+
         async def get_tool_security():
             from app.core import database
             from app.models.models import Tool
@@ -358,12 +374,17 @@ class ArchiveToPdfModule(BaseModule):
         with ui.card().classes("w-full max-w-3xl p-6 shadow-md"):
             state = {"files": [], "processing": False}
 
-            progress_bar = ui.linear_progress(value=0, show_value=False).classes(
-                "mb-4 hidden"
-            )
-            status_label = ui.label("等待上传...").classes(
-                "text-sm text-slate-500 mb-2 hidden"
-            )
+            # 使用自定义 HTML 元素构建进度条，解决组件显示冲突问题
+            with ui.element("div").classes(
+                "w-full bg-slate-100 rounded-full h-3 mb-4 overflow-hidden"
+            ).style("display: none") as progress_container:
+                progress_bar_inner = ui.element("div").classes(
+                    "bg-blue-500 h-full transition-all duration-300"
+                ).style("width: 0%")
+
+            status_label = ui.label("等待操作...").classes(
+                "text-sm text-slate-500 mb-2"
+            ).style("display: none")
 
             captcha_container = ui.element("div").classes(
                 "w-full flex justify-center mb-4 hidden"
@@ -426,10 +447,10 @@ class ArchiveToPdfModule(BaseModule):
                     state["files"].append({"name": file_name, "content": content})
                     update_file_list()
 
-                    ui.notify(f"已添加: {file_name}", color="positive")
+                    ui.notify(f"成功添加文件: {file_name}", color="positive")
                 except Exception as ex:
-                    ui.notify("文件处理失败", color="negative")
-                    show_error_report(str(ex))
+                    print(f"Upload Error: {ex}")
+                    ui.notify(f"文件处理失败: {ex}", color="negative")
 
             ui.upload(
                 label="选择或拖拽文件（支持批量选择）",
@@ -450,18 +471,6 @@ class ArchiveToPdfModule(BaseModule):
 
                 from app.core.task_manager import global_task_manager
                 from app.core.auth import is_authenticated, verify_turnstile
-
-                # 定义一个内部函数来安全更新 UI
-                def safe_ui(func, *args, **kwargs):
-                    try:
-                        func(*args, **kwargs)
-                    except RuntimeError as e:
-                        # 忽略元素已删除的错误
-                        if "deleted" in str(e).lower() or "parent slot" in str(e).lower() or "client" in str(e).lower():
-                            return
-                        print(f"UI Update Runtime Error: {e}")
-                    except Exception as e:
-                        print(f"UI Update Error: {e}")
 
                 if (
                     security_state["requires_captcha"]
@@ -496,9 +505,9 @@ class ArchiveToPdfModule(BaseModule):
                     filename=", ".join([f["name"] for f in state["files"]]),
                 )
 
-                safe_ui(status_label.set_visibility, True)
-                safe_ui(progress_bar.set_visibility, True)
-                safe_ui(progress_bar.props, "color=orange")
+                safe_ui(status_label.style, "display: block")
+                safe_ui(progress_container.style, "display: block")
+                safe_ui(progress_bar_inner.style, "width: 0%")
                 safe_ui(result_card.set_visibility, False)
 
                 # 进度信息共享字典
@@ -509,22 +518,27 @@ class ArchiveToPdfModule(BaseModule):
                     while state["processing"]:
                         if progress_info["total"] > 0:
                             # 真实进度模式（批量）
-                            p = progress_info["current"] / progress_info["total"]
-                            # 限制最大 99%，给打包预留空间
-                            if p > 0.99:
-                                p = 0.99
-                            safe_ui(progress_bar.set_value, p)
-                            safe_ui(
-                                status_label.set_text,
-                                f"正在转换... ({progress_info['current']}/{progress_info['total']})",
-                            )
+                            try:
+                                p = progress_info["current"] / progress_info["total"]
+                                if p > 0.99:
+                                    p = 0.99
+                                safe_ui(progress_bar_inner.style, f"width: {p*100}%")
+                                safe_ui(
+                                    status_label.set_text,
+                                    f"正在转换... ({progress_info['current']}/{progress_info['total']})",
+                                )
+                            except Exception as e:
+                                print(f"Progress Monitor Error: {e}")
                         else:
                             # 模拟进度模式（单文件或初始化阶段）
                             try:
-                                current_val = progress_bar.value
+                                # 尝试解析当前百分比并模拟增长
+                                current_style = progress_bar_inner.style.get("width", "0%")
+                                current_val = float(current_style.replace("%", "")) / 100
                                 if current_val < 0.95:
                                     increment = (0.98 - current_val) / 20
-                                    safe_ui(progress_bar.set_value, current_val + increment)
+                                    new_p = (current_val + increment) * 100
+                                    safe_ui(progress_bar_inner.style, f"width: {new_p}%")
                             except Exception:
                                 pass
                         await asyncio.sleep(0.5)
@@ -539,7 +553,7 @@ class ArchiveToPdfModule(BaseModule):
                             safe_ui(
                                 status_label.set_text, f"排队中: 前方有 {pos - 1} 个任务..."
                             )
-                            safe_ui(progress_bar.set_value, 0.02)
+                            safe_ui(progress_bar_inner.style, "width: 2%")
                         else:
                             if task.id in global_task_manager.active_tasks:
                                 break
@@ -609,8 +623,8 @@ class ArchiveToPdfModule(BaseModule):
                         shutil.rmtree(temp_input, ignore_errors=True)
 
                         state["processing"] = False
-                        safe_ui(progress_bar.set_value, 1.0)
-                        safe_ui(progress_bar.props, "color=green")
+                        safe_ui(progress_bar_inner.style, "width: 100%")
+                        safe_ui(progress_bar_inner.classes, add="bg-green-500", remove="bg-blue-500")
                         safe_ui(status_label.set_text, "处理完成！")
                         try:
                             ui.notify("转换成功！", color="positive")
@@ -669,8 +683,8 @@ class ArchiveToPdfModule(BaseModule):
                         pdf_name = os.path.basename(result_pdf)
 
                         state["processing"] = False
-                        safe_ui(progress_bar.set_value, 1.0)
-                        safe_ui(progress_bar.props, "color=green")
+                        safe_ui(progress_bar_inner.style, "width: 100%")
+                        safe_ui(progress_bar_inner.classes, add="bg-green-500", remove="bg-blue-500")
                         safe_ui(status_label.set_text, "转换完成！")
                         try:
                             ui.notify("转换成功！", color="positive")
