@@ -58,10 +58,6 @@ class MdToPdfModule(BaseModule):
     def setup_api(self):
         @app.get(f"{self.router.prefix}/download/{{file_id}}")
         async def download_md_pdf(request: Request, file_id: str, token: str = None):
-            client_ip = request.client.host
-            if "x-forwarded-for" in request.headers:
-                client_ip = request.headers["x-forwarded-for"].split(",")[0]
-
             safe_id = os.path.basename(file_id)
             file_path = os.path.join(self.temp_dir, f"{safe_id}.pdf")
 
@@ -83,29 +79,49 @@ class MdToPdfModule(BaseModule):
                     },
                 )
 
-            if token_info["ip"] != client_ip:
-                return JSONResponse(
-                    status_code=403,
-                    content={
-                        "error": "IP不匹配，请使用上传时的网络下载",
-                        "reason": "ip_mismatch",
-                    },
-                )
-
             if token != token_info["token"]:
                 return JSONResponse(
                     status_code=403,
                     content={"error": "下载Token无效", "reason": "token_invalid"},
                 )
 
-            if time.time() - token_info.get("created_at", 0) > 3600:
+            # 强制 UA 验证
+            user_agent = request.headers.get("user-agent", "").strip()
+            if not user_agent:
                 return JSONResponse(
                     status_code=403,
-                    content={
-                        "error": "下载链接已过期，请重新转换文件",
-                        "reason": "link_expired",
-                    },
+                    content={"error": "User-Agent无效", "reason": "ua_invalid"},
                 )
+
+            # 可选配置：IP 验证
+            from app.core.settings_manager import get_setting
+
+            check_ip = await get_setting("download_check_ip", "false")
+            if check_ip == "true":
+                client_ip = request.client.host
+                if "x-forwarded-for" in request.headers:
+                    client_ip = request.headers["x-forwarded-for"].split(",")[0]
+                if token_info["ip"] != client_ip:
+                    return JSONResponse(
+                        status_code=403,
+                        content={
+                            "error": "IP不匹配，请使用上传时的网络下载",
+                            "reason": "ip_mismatch",
+                        },
+                    )
+
+            # 可选配置：过期验证
+            check_expire = await get_setting("download_check_expire", "false")
+            if check_expire == "true":
+                expire_time = int(await get_setting("download_expire_time", "3600"))
+                if time.time() - token_info.get("created_at", 0) > expire_time:
+                    return JSONResponse(
+                        status_code=403,
+                        content={
+                            "error": "下载链接已过期，请重新转换文件",
+                            "reason": "link_expired",
+                        },
+                    )
 
             return FileResponse(
                 file_path,

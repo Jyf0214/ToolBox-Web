@@ -124,6 +124,49 @@ async def render_settings(state):
 
         ui.button("保存验证码配置", on_click=save_cf).classes("mt-4")
 
+    # 下载安全设置
+    with ui.card().classes("w-full p-6 shadow-sm border mb-6"):
+        ui.label("下载安全设置").classes("text-lg font-bold mb-4")
+        ui.markdown(
+            "配置文件下载的安全验证策略。Token V2 验证和 UA 验证为强制开启，其他可选。"
+        ).classes("text-xs text-slate-500 mb-2")
+
+        # 获取当前设置
+        check_ip = await get_setting("download_check_ip", "false") == "true"
+        check_expire = await get_setting("download_check_expire", "false") == "true"
+        expire_time = await get_setting("download_expire_time", "3600")
+
+        # IP 验证开关
+        ip_switch = ui.switch("启用 IP 验证", value=check_ip).classes("w-full mb-2")
+
+        # 过期验证开关
+        expire_switch = ui.switch("启用链接过期验证", value=check_expire).classes(
+            "w-full mb-2"
+        )
+
+        # 过期时间设置
+        expire_input = (
+            ui.input(
+                "链接有效期（秒）",
+                value=expire_time,
+                placeholder="3600",
+            )
+            .classes("w-full mb-2")
+            .props("outlined dense")
+        )
+
+        ui.markdown("说明：链接过期时间默认为3600秒（1小时）。").classes(
+            "text-xs text-slate-400 mb-2"
+        )
+
+        async def save_download_security():
+            await set_setting("download_check_ip", str(ip_switch.value).lower())
+            await set_setting("download_check_expire", str(expire_switch.value).lower())
+            await set_setting("download_expire_time", expire_input.value)
+            ui.notify("下载安全设置已保存")
+
+        ui.button("保存下载安全设置", on_click=save_download_security).classes("mt-4")
+
 
 async def render_smtp():
     ui.label("邮件设置").classes("text-2xl font-bold mb-6")
