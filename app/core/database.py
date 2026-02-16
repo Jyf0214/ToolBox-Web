@@ -1,21 +1,33 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.exc import OperationalError
-from sqlalchemy import text
-from app.core.config import settings
 import ssl
 import logging
+import asyncio
+import traceback
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import text
+from app.core.config import settings
 
-# 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# SQLAlchemy 基类
 Base = declarative_base()
 
-# 初始化引擎的占位符
 engine = None
 AsyncSessionLocal = None
+
+
+async def test_connection_with_timeout(db_url, connect_args, timeout=10.0):
+    temp_engine = create_async_engine(
+        db_url, connect_args=connect_args, pool_pre_ping=True
+    )
+    try:
+        async with temp_engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return temp_engine
+    except Exception as e:
+        print(f"DEBUG: 连接测试内部错误: {type(e).__name__}")
+        await temp_engine.dispose()
+        raise e
 
 
 async def create_engine_with_ssl_fallback():
@@ -23,131 +35,79 @@ async def create_engine_with_ssl_fallback():
 
     db_url = settings.DATABASE_URL
 
-    # 确保是 MySQL URL 并使用正确的异步驱动
+    db_host = "Unknown"
+    try:
+        db_host = db_url.split("@")[-1].split("/")[0]
+    except Exception:
+        pass
+
     if db_url.startswith("mysql://"):
-        db_url = db_url.replace("mysql://", "mysql+asyncmy://", 1)
-        logger.info(
-            f"Automatically updated database URL schema to: {db_url.split('@')[-1]}"
-        )  # 只打印主机部分以保护敏感信息
-    elif not db_url.startswith("mysql+asyncmy://"):
-        logger.error(
-            f"Unsupported database URL schema: {db_url}. Expected mysql+asyncmy:// or mysql://"
-        )
-        raise ValueError(
-            "Unsupported database URL schema. Expected mysql+asyncmy:// or mysql://"
-        )
+        db_url = db_url.replace("mysql://", "mysql+aiomysql://", 1)
+        print(f"DEBUG: 自动修正数据库协议头为 mysql+aiomysql://, 目标主机: {db_host}")
+    elif db_url.startswith("mysql+asyncmy://"):
+        db_url = db_url.replace("mysql+asyncmy://", "mysql+aiomysql://", 1)
+        print(f"DEBUG: 迁移数据库驱动: asyncmy -> aiomysql, 目标主机: {db_host}")
+    elif not db_url.startswith("mysql+aiomysql://"):
+        print(f"CRITICAL: 不支持的数据库协议: {db_url.split('://')[0]}")
+        raise ValueError("Unsupported database dialect. Use mysql+aiomysql://")
 
-    # 解析 URL 以便手动修改 SSL 参数
-    from sqlalchemy.engine import make_url
+    if "ssl=disabled" in db_url.lower() or "ssl=false" in db_url.lower():
+        print("CRITICAL: 检测到不安全的连接字符串参数 (ssl=disabled/false)，已拒绝。")
+        raise ValueError("Insecure database connections are strictly prohibited.")
 
-    parsed_url = make_url(db_url)
+    print("\n[1/2] 正在尝试标准 SSL 连接... (超时设定: 10s)")
 
-    # 尝试连接 - 优先级 1: 默认 SSL (driver-dependent, 通常启用)
     try:
-        logger.info("Attempting MySQL connection with default SSL...")
-        engine = create_async_engine(db_url, echo=False)
-        async with engine.connect() as conn:
-            await conn.run_sync(lambda sync_conn: sync_conn.execute(text("SELECT 1")))
-        logger.info("MySQL connection successful with default SSL.")
-        return
-    except OperationalError as e:
-        if "SSL" in str(e) or "certificate" in str(e) or "handshake" in str(e):
-            logger.warning(
-                f"MySQL connection with default SSL failed: {e}. Attempting without SSL verification..."
-            )
+        engine = await asyncio.wait_for(
+            test_connection_with_timeout(db_url, {"ssl": True}), timeout=10.0
+        )
+        print("SUCCESS: 标准 SSL 连接验证通过。")
+    except (asyncio.TimeoutError, Exception) as e:
+        if isinstance(e, asyncio.TimeoutError):
+            print("反馈: 第一次连接尝试超时 (10s)。可能是网络连接问题或防火墙拦截。")
         else:
-            logger.warning(
-                f"MySQL connection with default SSL failed (non-SSL error): {e}. Attempting without SSL verification..."
+            print(f"反馈: 第一次连接尝试失败。错误类型: {type(e).__name__}")
+            print(f"详细错误信息: {e}")
+
+        print(
+            f"\n[2/2] 正在切换至 TOFU 模式 (信任证书并强制 SSL 加密)... 目标: {db_host}"
+        )
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        try:
+            engine = await asyncio.wait_for(
+                test_connection_with_timeout(db_url, {"ssl": ctx}), timeout=15.0
             )
-    except Exception as e:
-        logger.warning(
-            f"Unexpected error during default SSL connection attempt: {e}. Attempting without SSL verification..."
-        )
+            print("SUCCESS: TOFU 加密连接建立成功。")
+        except Exception as retry_e:
+            print(f"\n{'=' * 20} 数据库连接最终失败详情 {'=' * 20}")
+            print(f"异常类型: {type(retry_e).__name__}")
+            print(f"异常详情: {retry_e}")
+            print("\n完整错误堆栈:")
+            print(traceback.format_exc())
+            print(f"{'=' * 60}\n")
+            raise retry_e
 
-    # 尝试连接 - 优先级 2: 禁用 SSL 证书验证
-    # 这通常通过在 URL 中添加参数或通过 connect_args 实现。
-    # asyncmy 驱动通常通过 `ssl_verify_cert=False` 或 `ssl_disabled=True` (如果支持) 来控制
-    # 默认情况下，asyncmy 可能会自动启用 SSL 并验证。这里我们尝试明确关闭验证。
-    # 假设可以在 connect_args 中传递 `ssl` 字典或 `ssl_verify_cert`
-    try:
-        logger.info("Attempting MySQL connection with SSL (no verification)...")
-        # 构建新的 URL，添加 SSL 参数
-        connect_args = {
-            "ssl": {
-                "ssl_verify_mode": ssl.CERT_NONE  # 禁用证书验证
-            }
-        }
-        # 如果 asyncmy 不支持 ssl_verify_mode, 可能需要其他参数，例如 ssl_disabled=True
-        # 但是 CERT_NONE 是标准做法
-        engine = create_async_engine(db_url, echo=False, connect_args=connect_args)
-        async with engine.connect() as conn:
-            await conn.run_sync(lambda sync_conn: sync_conn.execute(text("SELECT 1")))
-        logger.warning(
-            "MySQL connection successful with SSL, but certificate verification was disabled. 连接SSL认证不可信。"
-        )
-        return
-    except OperationalError as e:
-        if "SSL" in str(e) or "certificate" in str(e) or "handshake" in str(e):
-            logger.warning(
-                f"MySQL connection with SSL (no verification) failed: {e}. Attempting without SSL at all..."
-            )
-        else:
-            logger.warning(
-                f"MySQL connection with SSL (no verification) failed (non-SSL error): {e}. Attempting without SSL at all..."
-            )
-    except Exception as e:
-        logger.warning(
-            f"Unexpected error during SSL (no verification) connection attempt: {e}. Attempting without SSL at all..."
-        )
-
-    # 尝试连接 - 优先级 3: 完全不使用 SSL
-    try:
-        logger.info("Attempting MySQL connection without SSL...")
-        # 重建 URL，确保移除所有 SSL 参数，并可能添加明确的 disable_ssl
-        new_url = parsed_url.set(
-            query={k: v for k, v in parsed_url.query.items() if not k.startswith("ssl")}
-        )
-        # asyncmy 驱动默认会尝试 SSL, 可能需要在 connect_args 明确传递 ssl=False 或者设置 ssl_disabled=True
-        # 对于 asyncmy, 可以在 drivername 中指定 no-ssl 版本或在 connect_args 中控制
-        # 实际操作中，如果 URL 字符串不包含ssl相关参数，并且connect_args中不指定，asyncmy默认行为可能根据MySQL服务器配置
-        # 最简单粗暴的方式是确保 URL 本身不带 ssl=true 并在 connect_args 不指定
-        # asyncmy 的默认行为是如果 mysql_ssl=True (默认) 则尝试 SSL
-        # 我们可以通过 `drivername` 来强制不使用 SSL
-        if parsed_url.drivername == "mysql+asyncmy":
-            new_url = new_url.set(drivername="mysql+asyncmy")  # Keep original driver
-            # 尝试通过 connect_args 明确禁用 SSL
-            engine = create_async_engine(
-                new_url, echo=False, connect_args={"ssl": False}
-            )  # asyncmy uses ssl=False
-        else:
-            engine = create_async_engine(new_url, echo=False)
-
-        async with engine.connect() as conn:
-            await conn.run_sync(lambda sync_conn: sync_conn.execute(text("SELECT 1")))
-        logger.info("MySQL connection successful without SSL.")
-        return
-    except Exception as e:
-        logger.error(f"MySQL connection failed without SSL after all attempts: {e}")
-        raise
-
-
-# 创建 SessionLocal
-def create_session_local():
-    global AsyncSessionLocal
-    if engine is None:
-        raise RuntimeError(
-            "Database engine not initialized. Call create_engine_with_ssl_fallback() first."
-        )
     AsyncSessionLocal = sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
 
 
-# 获取数据库 session
+def create_session_local():
+    global AsyncSessionLocal
+    if AsyncSessionLocal is None:
+        raise RuntimeError("Database engine not initialized.")
+    return AsyncSessionLocal
+
+
 async def get_db():
     if AsyncSessionLocal is None:
-        raise RuntimeError(
-            "AsyncSessionLocal not initialized. Call create_engine_with_ssl_fallback() and create_session_local() first."
-        )
+        await create_engine_with_ssl_fallback()
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+        finally:
+            await session.close()

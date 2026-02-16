@@ -1,16 +1,37 @@
 FROM python:3.11-slim
 
 # 设置环境变量防止交互式弹窗
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUSERBASE=/home/appuser/.local
 
-# 安装系统包：构建工具、LibreOffice 和中文字体
-RUN apt-get update && apt-get install -y \
+# 1. 以 root 身份安装系统包和基础依赖
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     libreoffice \
     fonts-wqy-zenhei \
     fonts-wqy-microhei \
-    && rm -rf /var/lib/apt/lists/*
+    git && \
+    rm -rf /var/lib/apt/lists/*
 
-# 基础镜像不拷贝代码，不安装 pip 依赖
+# 2. 创建非特权用户
+RUN useradd -u 1000 -m -s /bin/bash appuser
+
+# 3. 安装 pip 依赖 (以 root 身份安装到系统路径)
 WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && \
+    # 安全加固：限制 pip 仅 root 可调用，防止普通用户修改环境
+    chmod 700 $(which pip)
+
+# 4. 目录权限限制
+# 确保系统关键路径对 appuser 是只读的，仅 /app 和 /tmp 以及用户家目录可写
+RUN chown -R appuser:appuser /app && \
+    chmod -R 755 /usr/local/lib/python3.11 && \
+    # 预创建临时文件夹并赋权
+    mkdir -p /app/temp_files && \
+    chown -R appuser:appuser /app/temp_files
+
+# 切换到非特权用户
+USER appuser

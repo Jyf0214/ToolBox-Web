@@ -4,8 +4,17 @@ from fastapi import APIRouter
 
 class BaseModule(ABC):
     def __init__(self):
-        self.id = self.__class__.__name__.lower()
         self.router = APIRouter(prefix=f"/api/{self.id}")
+
+    @property
+    def id(self):
+        """模块唯一ID，默认为类名小写"""
+        return self.__class__.__name__.lower()
+
+    @property
+    def default_enabled(self):
+        """默认是否开启"""
+        return True
 
     @property
     @abstractmethod

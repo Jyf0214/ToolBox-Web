@@ -18,15 +18,16 @@ def get_version_from_changelog() -> str:
                 match = re.search(r"## \[(\d+\.\d+\.\d+)\]", line)
                 if match:
                     return match.group(1)
-    except Exception:
-        pass
+    except (OSError, IOError, re.error):
+        # 文件读取错误或正则错误时返回默认值
+        return "0.0.0"
     return "0.0.0"
 
 
 class Settings(BaseSettings):
     # 数据库 URL 是唯一允许的必需环境变量
     DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", "mysql+asyncmy://user:password@localhost:3306/toolbox"
+        "DATABASE_URL", "mysql+aiomysql://user:password@localhost:3306/toolbox"
     )
 
     # 自动获取当前版本

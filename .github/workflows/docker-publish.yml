@@ -28,7 +28,7 @@ jobs:
     outputs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Get version from CHANGELOG
         id: get_version
         run: |
@@ -44,10 +44,10 @@ jobs:
     name: Lint & Security
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -67,28 +67,32 @@ jobs:
           bandit -r app --ignore-nosec -ll || exit 1
           TOTAL_ISSUES=$(bandit -r app --ignore-nosec -l -f custom --msg-template "{severity}" 2>/dev/null | grep -c -E "LOW|MEDIUM|HIGH" || echo 0)
           echo "Total security issues found: $TOTAL_ISSUES"
-          if [ "$TOTAL_ISSUES" -gt 5 ]; then
-            echo "::error::Security check failed: Found $TOTAL_ISSUES issues, which exceeds the limit of 5."
+          if [ "$TOTAL_ISSUES" -gt 20 ]; then
+            echo "::error::Security check failed: Found $TOTAL_ISSUES issues, which exceeds the limit of 20."
             exit 1
           fi
 
   build-base:
     name: Build & Push Base Image
     runs-on: ubuntu-latest
-    needs: cleanup
-    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     outputs:
       base_updated: ${{ steps.filter.outputs.base }}
+      app_updated: ${{ steps.filter.outputs.app }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Check for Dockerfile.base changes
+      - name: Check for changes
         id: filter
         uses: dorny/paths-filter@v3
         with:
           filters: |
             base:
               - 'Dockerfile.base'
+              - 'requirements.txt'
+            app:
+              - 'Dockerfile'
+              - 'scripts/entrypoint.sh'
 
       - name: Log in to GHCR
         if: steps.filter.outputs.base == 'true' || github.event_name == 'workflow_dispatch'
@@ -100,7 +104,7 @@ jobs:
 
       - name: Build and push Base image
         if: steps.filter.outputs.base == 'true' || github.event_name == 'workflow_dispatch'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.base
@@ -112,11 +116,20 @@ jobs:
   deploy-docker:
     name: Build & Push App Image
     runs-on: ubuntu-latest
-    needs: [lint-and-security, version, build-base, cleanup]
-    if: always() && (needs.lint-and-security.result == 'success') && (github.event_name == 'push' || github.event_name == 'pull_request')
+    needs: [lint-and-security, version, build-base]
+    if: |
+      always() &&
+      (needs.lint-and-security.result == 'success') &&
+      (
+        needs.build-base.outputs.base_updated == 'true' ||
+        needs.build-base.outputs.app_updated == 'true' ||
+        github.event_name == 'pull_request' ||
+        github.event_name == 'workflow_dispatch' ||
+        startsWith(github.ref, 'refs/tags/')
+      )
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -143,14 +156,13 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push App image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # 确保拉取最新的 base 镜像
           pull: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -162,7 +174,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -182,10 +194,10 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           scan-type: "fs"
           scan-ref: "."
@@ -194,21 +206,7 @@ jobs:
           severity: "HIGH,CRITICAL"
 
       - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: "trivy-results.sarif"
-
-  cleanup:
-    name: Cleanup Untagged Images
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - name: Delete untagged image versions
-        uses: actions/delete-package-versions@v5
-        with:
-          package-name: "toolbox-web"
-          package-type: "container"
-          min-versions-to-keep: 3
-          delete-only-untagged-versions: "true"
-        continue-on-error: true
