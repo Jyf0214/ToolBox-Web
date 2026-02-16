@@ -57,7 +57,7 @@ async def render_system_status(state):
                         f"{t.completed_at.strftime('%H:%M')} | {t.task_name} | {t.status}"
                     ).classes("text-xs border-b py-1")
 
-    h_container = ui.container()
+    h_container = ui.element("div")
     with h_container:
         await history_list()
 
@@ -173,7 +173,7 @@ def render_queue():
                     "text-slate-500 text-sm"
                 )
 
-    q_container = ui.container()
+    q_container = ui.element("div")
     with q_container:
         q_list()
 

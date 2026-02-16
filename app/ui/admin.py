@@ -192,7 +192,7 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
             sections["queue"] = ui.column().classes("w-full hidden")
             sections["status"] = ui.column().classes("w-full hidden")
             sections["logs"] = ui.column().classes("w-full hidden")
-            
+
             ui.timer(0.1, lambda: load_all_sections(), once=True)
 
         async def load_all_sections():
@@ -258,4 +258,3 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                     ui.notify("管理后台组件初始化发生严重错误", color="negative")
                 except Exception:
                     pass
-
