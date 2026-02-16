@@ -8,7 +8,6 @@ import hashlib
 import time
 from pathlib import Path
 from typing import Tuple, List
-from multiprocessing import Pool, Manager
 from app.modules.base import BaseModule
 from nicegui import ui, app
 from fastapi.responses import FileResponse, JSONResponse
@@ -391,44 +390,22 @@ class ArchiveToPdfModule(BaseModule):
         success_count = 0
         max_retries = 3
 
-        # 使用Manager创建共享队列用于进度跟踪
-        manager = Manager()
-        progress_queue = manager.Queue()
-
-        # 准备带队列参数的任务列表
-        tasks_with_queue = [
-            (fp, fn, od, progress_queue) for fp, fn, od in files_to_process
-        ]
-
-        # 第一次处理：使用2个进程并行处理所有文件
-        print(f"[Process] 开始处理 {total_count} 个文件，使用 2 进程并行...")
-        with Pool(processes=2) as pool:
-            # 启动异步任务
-            result_async = pool.map_async(_convert_single_file, tasks_with_queue)
-
-            # 监控进度
-            completed = 0
-            while not result_async.ready() or completed < total_count:
-                try:
-                    # 非阻塞获取进度更新
-                    progress_queue.get(timeout=0.1)
-                    completed += 1
-                    if progress_info is not None:
-                        progress_info["current"] = completed
-                except Exception:
-                    # 队列为空，继续检查
-                    pass
-
-            # 获取所有结果
-            results = result_async.get()
-
-            # 分离成功和失败的文件
-            failed_files = []
-            for i, (status, file_name) in enumerate(results):
-                if status == "success":
-                    success_count += 1
-                else:
-                    failed_files.append(tasks_with_queue[i])
+        # 第一次处理：单线程逐个处理所有文件
+        print(f"[Process] 开始处理 {total_count} 个文件，使用单线程...")
+        failed_files = []
+        for file_path, file_name, output_dir in files_to_process:
+            # 直接调用转换函数（不使用多进程）
+            status, _ = _convert_single_file((file_path, file_name, output_dir, None))
+            
+            if status == "success":
+                success_count += 1
+            else:
+                # 添加到失败列表，供后续重试
+                failed_files.append((file_path, file_name, output_dir))
+            
+            # 更新进度
+            if progress_info is not None:
+                progress_info["current"] += 1
 
         # 如果有失败的文件，进行重试
         retry_count = 1
@@ -437,36 +414,15 @@ class ArchiveToPdfModule(BaseModule):
                 f"[Process] 第 {retry_count} 次重试，处理 {len(failed_files)} 个失败文件..."
             )
 
-            # 每次重试都创建新的 Pool 和 Queue
-            manager = Manager()
-            progress_queue = manager.Queue()
-
-            # 为失败文件添加进度队列参数
-            failed_tasks = [
-                (fp, fn, od, progress_queue) for fp, fn, od, _ in failed_files
-            ]
-
+            # 重试失败的文件
             new_failed_files = []
-            with Pool(processes=1) as pool:
-                result_async = pool.map_async(_convert_single_file, failed_tasks)
-
-                # 监控进度
-                completed = 0
-                total_retry = len(failed_files)
-                while not result_async.ready() or completed < total_retry:
-                    try:
-                        progress_queue.get(timeout=0.1)
-                        completed += 1
-                    except Exception:
-                        pass
-
-                # 获取结果
-                results = result_async.get()
-                for i, (status, file_name) in enumerate(results):
-                    if status == "success":
-                        success_count += 1
-                    else:
-                        new_failed_files.append(failed_tasks[i])
+            for file_path, file_name, output_dir in failed_files:
+                status, _ = _convert_single_file((file_path, file_name, output_dir, None))
+                
+                if status == "success":
+                    success_count += 1
+                else:
+                    new_failed_files.append((file_path, file_name, output_dir))
 
             failed_files = new_failed_files
             retry_count += 1

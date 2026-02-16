@@ -179,10 +179,8 @@ class MdToPdfModule(BaseModule):
                     file_id = str(asyncio.get_event_loop().time()).replace(".", "")
                     output_path = os.path.join(self.temp_dir, f"{file_id}.pdf")
 
-                    # 运行转换
-                    await asyncio.get_event_loop().run_in_executor(
-                        None, self._convert_md_to_pdf, md_input.value, output_path
-                    )
+                    # 运行转换（同步执行，单线程）
+                    self._convert_md_to_pdf(md_input.value, output_path)
 
                     # 获取客户端 IP 并生成 token
                     client_ip = app.storage.browser.get("id", "Anonymous")
