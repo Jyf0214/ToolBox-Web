@@ -383,7 +383,7 @@ class ArchiveToPdfModule(BaseModule):
         self, input_dir: str, output_dir: str, progress_info: dict = None
     ) -> Tuple[int, int]:
         """
-        递归处理目录中的所有文档（使用5进程并行处理，支持失败重试）
+        递归处理目录中的所有文档（使用2进程并行处理，支持失败重试）
         :param input_dir: 输入目录
         :param output_dir: 输出目录
         :param progress_info: 进度信息字典 {'current': 0, 'total': 0}
@@ -430,9 +430,9 @@ class ArchiveToPdfModule(BaseModule):
             (fp, fn, od, progress_queue) for fp, fn, od in files_to_process
         ]
 
-        # 第一次处理：使用5个进程并行处理所有文件
-        print(f"[Process] 开始处理 {total_count} 个文件，使用 5 进程并行...")
-        with Pool(processes=5) as pool:
+        # 第一次处理：使用2个进程并行处理所有文件
+        print(f"[Process] 开始处理 {total_count} 个文件，使用 2 进程并行...")
+        with Pool(processes=2) as pool:
             # 启动异步任务
             result_async = pool.map_async(_convert_single_file, tasks_with_queue)
 
@@ -477,7 +477,7 @@ class ArchiveToPdfModule(BaseModule):
             ]
 
             new_failed_files = []
-            with Pool(processes=min(3, len(failed_files))) as pool:
+            with Pool(processes=min(2, len(failed_files))) as pool:
                 result_async = pool.map_async(_convert_single_file, failed_tasks)
 
                 # 监控进度
