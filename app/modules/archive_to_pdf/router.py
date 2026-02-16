@@ -383,7 +383,7 @@ class ArchiveToPdfModule(BaseModule):
         self, input_dir: str, output_dir: str, progress_info: dict = None
     ) -> Tuple[int, int]:
         """
-        递归处理目录中的所有文档（使用5进程并行处理）
+        递归处理目录中的所有文档（使用5进程并行处理，支持失败重试）
         :param input_dir: 输入目录
         :param output_dir: 输出目录
         :param progress_info: 进度信息字典 {'current': 0, 'total': 0}
@@ -419,6 +419,7 @@ class ArchiveToPdfModule(BaseModule):
 
         total_count = len(files_to_process)
         success_count = 0
+        max_retries = 3
 
         # 使用Manager创建共享队列用于进度跟踪
         manager = Manager()
@@ -429,7 +430,8 @@ class ArchiveToPdfModule(BaseModule):
             (fp, fn, od, progress_queue) for fp, fn, od in files_to_process
         ]
 
-        # 使用5个进程并行处理
+        # 第一次处理：使用5个进程并行处理所有文件
+        print(f"[Process] 开始处理 {total_count} 个文件，使用 5 进程并行...")
         with Pool(processes=5) as pool:
             # 启动异步任务
             result_async = pool.map_async(_convert_single_file, tasks_with_queue)
@@ -449,9 +451,69 @@ class ArchiveToPdfModule(BaseModule):
 
             # 获取所有结果
             results = result_async.get()
-            for status, file_name in results:
+
+            # 分离成功和失败的文件
+            failed_files = []
+            for i, (status, file_name) in enumerate(results):
                 if status == "success":
                     success_count += 1
+                else:
+                    failed_files.append(tasks_with_queue[i])
+
+        # 如果有失败的文件，进行重试
+        retry_count = 1
+        while failed_files and retry_count <= max_retries:
+            print(
+                f"[Process] 第 {retry_count} 次重试，处理 {len(failed_files)} 个失败文件..."
+            )
+
+            # 每次重试都创建新的 Pool 和 Queue
+            manager = Manager()
+            progress_queue = manager.Queue()
+
+            # 为失败文件添加进度队列参数
+            failed_tasks = [
+                (fp, fn, od, progress_queue) for fp, fn, od, _ in failed_files
+            ]
+
+            new_failed_files = []
+            with Pool(processes=min(3, len(failed_files))) as pool:
+                result_async = pool.map_async(_convert_single_file, failed_tasks)
+
+                # 监控进度
+                completed = 0
+                total_retry = len(failed_files)
+                while not result_async.ready() or completed < total_retry:
+                    try:
+                        progress_queue.get(timeout=0.1)
+                        completed += 1
+                    except Exception:
+                        pass
+
+                # 获取结果
+                results = result_async.get()
+                for i, (status, file_name) in enumerate(results):
+                    if status == "success":
+                        success_count += 1
+                    else:
+                        new_failed_files.append(failed_tasks[i])
+
+            failed_files = new_failed_files
+            retry_count += 1
+
+            # 短暂延迟后重试
+            if failed_files:
+                time.sleep(1)
+
+        # 输出最终结果
+        if failed_files:
+            print(
+                f"[Process] 处理完成：{success_count}/{total_count} 成功，{len(failed_files)} 个文件重试后仍失败"
+            )
+            for fp, fn, od, _ in failed_files:
+                print(f"  - 失败: {fn}")
+        else:
+            print(f"[Process] 处理完成：{success_count}/{total_count} 全部成功")
 
         return success_count, total_count
 
