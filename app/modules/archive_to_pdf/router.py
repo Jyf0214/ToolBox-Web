@@ -456,11 +456,12 @@ class ArchiveToPdfModule(BaseModule):
                     try:
                         func(*args, **kwargs)
                     except RuntimeError as e:
-                        if "deleted" in str(e).lower() or "parent slot" in str(e).lower():
+                        # 忽略元素已删除的错误
+                        if "deleted" in str(e).lower() or "parent slot" in str(e).lower() or "client" in str(e).lower():
                             return
-                        raise
-                    except Exception:
-                        pass
+                        print(f"UI Update Runtime Error: {e}")
+                    except Exception as e:
+                        print(f"UI Update Error: {e}")
 
                 if (
                     security_state["requires_captcha"]

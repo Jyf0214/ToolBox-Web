@@ -212,6 +212,18 @@ class DocxToPdfModule(BaseModule):
                 from app.core.task_manager import global_task_manager
                 from app.core.auth import is_authenticated, verify_turnstile
 
+                # 定义一个内部函数来安全更新 UI，并打印非生命周期错误
+                def safe_ui(func, *args, **kwargs):
+                    try:
+                        func(*args, **kwargs)
+                    except RuntimeError as e:
+                        # 忽略元素已删除的错误
+                        if "deleted" in str(e).lower() or "parent slot" in str(e).lower() or "client" in str(e).lower():
+                            return
+                        print(f"UI Update Runtime Error: {e}")
+                    except Exception as e:
+                        print(f"UI Update Error: {e}")
+
                 if (
                     security_state["requires_captcha"]
                     and security_state["site_key"]
@@ -235,49 +247,51 @@ class DocxToPdfModule(BaseModule):
 
                 client_ip = app.storage.browser.get("id", "Anonymous")
 
-                state["processing"] = True
-                convert_btn.disable()
-
-                task = await global_task_manager.add_task(
-                    name="Word 转 PDF",
-                    user_type="admin" if is_authenticated() else "guest",
-                    ip=client_ip,
-                    filename=state["name"],
-                )
-
-                status_label.set_visibility(True)
-                progress_bar.set_visibility(True)
-                progress_bar.props("color=orange")
-                result_card.set_visibility(False)
-
-                async def simulate_fake_progress():
-                    current = 0.05
-                    while state["processing"] and current < 0.95:
-                        # 进度越往后越慢，模拟真实复杂任务的处理感
-                        increment = (0.98 - current) / 15
-                        current += increment
-                        try:
-                            progress_bar.set_value(current)
-                        except Exception:
-                            pass
-                        await asyncio.sleep(0.8)
-
-                asyncio.create_task(simulate_fake_progress())
-
                 try:
+                    state["processing"] = True
+                    safe_ui(convert_btn.disable)
+
+                    task = await global_task_manager.add_task(
+                        name="Word 转 PDF",
+                        user_type="admin" if is_authenticated() else "guest",
+                        ip=client_ip,
+                        filename=state["name"],
+                    )
+
+                    safe_ui(status_label.set_visibility, True)
+                    safe_ui(progress_bar.set_visibility, True)
+                    safe_ui(progress_bar.props, "color=orange")
+                    safe_ui(result_card.set_visibility, False)
+
+                    async def simulate_fake_progress():
+                        current = 0.05
+                        while state["processing"] and current < 0.95:
+                            # 进度越往后越慢，模拟真实复杂任务的处理感
+                            increment = (0.98 - current) / 15
+                            current += increment
+                            try:
+                                safe_ui(progress_bar.set_value, current)
+                            except Exception:
+                                pass
+                            await asyncio.sleep(0.8)
+
+                    asyncio.create_task(simulate_fake_progress())
+
                     while True:
                         waiting_ids = [t.id for t in global_task_manager.queue]
                         if task.id in waiting_ids:
                             pos = waiting_ids.index(task.id) + 1
-                            status_label.set_text(f"排队中: 前方有 {pos - 1} 个任务...")
-                            progress_bar.set_value(0.02)
+                            safe_ui(
+                                status_label.set_text, f"排队中: 前方有 {pos - 1} 个任务..."
+                            )
+                            safe_ui(progress_bar.set_value, 0.02)
                         else:
                             if task.id in global_task_manager.active_tasks:
                                 break
                         await global_task_manager.start_task(task.id)
                         break
 
-                    status_label.set_text("正在转换 (LibreOffice 渲染中)...")
+                    safe_ui(status_label.set_text, "正在转换 (LibreOffice 渲染中)...")
 
                     file_id = str(uuid.uuid4())
                     input_path = os.path.join(self.temp_dir, f"{file_id}.docx")
@@ -306,61 +320,74 @@ class DocxToPdfModule(BaseModule):
                     stdout, stderr = await process.communicate()
 
                     if process.returncode == 0:
-                        status_label.set_text("后期处理中...")
+                        safe_ui(status_label.set_text, "后期处理中...")
                         if add_blank_page.value:
                             self._add_blank_page_if_needed(output_path, True)
 
                         info = self._get_pdf_info(output_path)
                         state["processing"] = False
-                        progress_bar.set_value(1.0)
-                        progress_bar.props("color=green")
-                        status_label.set_text("转换完成！")
-                        ui.notify("转换成功！", color="positive")
+                        safe_ui(progress_bar.set_value, 1.0)
+                        safe_ui(progress_bar.props, "color=green")
+                        safe_ui(status_label.set_text, "转换完成！")
+                        try:
+                            ui.notify("转换成功！", color="positive")
+                        except Exception:
+                            pass
 
                         download_url = f"{self.router.prefix}/download/{file_id}"
 
-                        result_card.clear()
-                        result_card.set_visibility(True)
-                        with result_card:
-                            with ui.row().classes(
-                                "w-full items-center justify-between"
-                            ):
-                                with ui.column():
-                                    ui.label(
-                                        state["name"].replace(".docx", ".pdf")
-                                    ).classes("font-bold text-lg")
-                                    ui.label(f"页数: {info['pages']} 页").classes(
-                                        "text-sm text-slate-500"
-                                    )
+                        try:
+                            result_card.clear()
+                            result_card.set_visibility(True)
+                            with result_card:
+                                with ui.row().classes(
+                                    "w-full items-center justify-between"
+                                ):
+                                    with ui.column():
+                                        ui.label(
+                                            state["name"].replace(".docx", ".pdf")
+                                        ).classes("font-bold text-lg")
+                                        ui.label(f"页数: {info['pages']} 页").classes(
+                                            "text-sm text-slate-500"
+                                        )
 
-                                with ui.row().classes("gap-2"):
-                                    ui.button(
-                                        "预览",
-                                        icon="visibility",
-                                        on_click=lambda: (
-                                            preview_frame.set_content(
-                                                f'<iframe src="{download_url}" style="width:100%; height:100%; border:none;"></iframe>'
+                                    with ui.row().classes("gap-2"):
+                                        ui.button(
+                                            "预览",
+                                            icon="visibility",
+                                            on_click=lambda: (
+                                                preview_frame.set_content(
+                                                    f'<iframe src="{download_url}" style="width:100%; height:100%; border:none;"></iframe>'
+                                                ),
+                                                preview_dialog.open(),
                                             ),
-                                            preview_dialog.open(),
-                                        ),
-                                    ).props("outline")
+                                        ).props("outline")
 
-                                    ui.button(
-                                        "下载 PDF",
-                                        icon="download",
-                                        on_click=lambda: ui.download(download_url),
-                                    ).props("color=primary")
+                                        ui.button(
+                                            "下载 PDF",
+                                            icon="download",
+                                            on_click=lambda: ui.download(download_url),
+                                        ).props("color=primary")
+                        except Exception:
+                            pass
                     else:
                         error_detail = f"LibreOffice Error:\n{stderr.decode()}"
-                        ui.notify("转换失败", color="negative")
+                        try:
+                            ui.notify("转换失败", color="negative")
+                        except Exception:
+                            pass
                         show_error_report(error_detail)
                 except Exception as ex:
-                    ui.notify("程序出错", color="negative")
+                    try:
+                        ui.notify("程序出错", color="negative")
+                    except Exception:
+                        pass
                     show_error_report(str(ex))
                 finally:
-                    await global_task_manager.complete_task(task.id)
+                    if 'task' in locals():
+                        await global_task_manager.complete_task(task.id)
                     state["processing"] = False
-                    convert_btn.enable()
+                    safe_ui(convert_btn.enable)
                     if input_path and os.path.exists(input_path):
                         os.remove(input_path)
 
