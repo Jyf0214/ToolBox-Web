@@ -510,10 +510,68 @@ class DocxToPdfModule(BaseModule):
                                             ),
                                         ).props("outline")
 
+                                        async def handle_download():
+                                            try:
+                                                result = await ui.run_javascript(
+                                                    f'''
+                                                    async function downloadFile() {{
+                                                        try {{
+                                                            const response = await fetch("{download_url}", {{
+                                                                method: 'GET',
+                                                                credentials: 'same-origin'
+                                                            }});
+                                                            if (!response.ok) {{
+                                                                const errorData = await response.json().catch(() => {{}});
+                                                                return {{
+                                                                    success: false,
+                                                                    status: response.status,
+                                                                    error: errorData.error || '下载失败',
+                                                                    reason: errorData.reason || 'unknown'
+                                                                }};
+                                                            }}
+                                                            const blob = await response.blob();
+                                                            const url = window.URL.createObjectURL(blob);
+                                                            const a = document.createElement('a');
+                                                            a.href = url;
+                                                            a.download = "{output_name}";
+                                                            document.body.appendChild(a);
+                                                            a.click();
+                                                            window.URL.revokeObjectURL(url);
+                                                            document.body.removeChild(a);
+                                                            return {{ success: true }};
+                                                        }} catch (e) {{
+                                                            return {{
+                                                                success: false,
+                                                                error: e.message || '网络请求失败'
+                                                            }};
+                                                        }}
+                                                    }}
+                                                    return await downloadFile();
+                                                    '''
+                                                )
+                                                if not result.get("success"):
+                                                    error_msg = f"下载失败 ({result.get('status', '未知')}): {result.get('error', '未知错误')}"
+                                                    if result.get("reason"):
+                                                        error_msg += f"\\n原因: {result['reason']}"
+                                                    ui.notify(
+                                                        error_msg,
+                                                        color="negative",
+                                                        multi_line=True,
+                                                    )
+                                                    show_error_report(error_msg)
+                                                else:
+                                                    ui.notify(
+                                                        "下载已开始", color="positive"
+                                                    )
+                                            except Exception as e:
+                                                error_msg = f"下载出错: {str(e)}"
+                                                ui.notify(error_msg, color="negative")
+                                                show_error_report(error_msg)
+
                                         ui.button(
                                             "下载 PDF",
                                             icon="download",
-                                            on_click=lambda: ui.download(download_url),
+                                            on_click=handle_download,
                                         ).props("color=primary")
                         except Exception:
                             pass
