@@ -19,52 +19,47 @@ async def api_security_middleware(request: Request, call_next):
     拦截直接通过脚本或逆向工具调用的 API 请求，并校验允许的来源站点
     """
     path = request.url.path
-    
+
     # 仅针对 API 和 下载路径进行深度校验
     if path.startswith("/api") or "/download/" in path:
         from app.core.settings_manager import get_setting
-        
+
         headers = request.headers
         host = headers.get("host", "")
         origin = headers.get("origin", "")
         referer = headers.get("referer", "")
-        
-        # --- 1. 管理员配置的白名单校验 ---
+        fetch_site = headers.get("sec-fetch-site", "")
+        ua = headers.get("user-agent", "").lower()
+
+        # --- 1. 校验 User-Agent (简单 Bot 过滤) ---
+        if not ua or any(bot in ua for bot in ["python", "curl", "wget", "http-client", "postman"]):
+            return Response(content="Automated access forbidden", status_code=403)
+
+        # --- 2. 管理员配置的白名单校验 ---
         allowed_origins_str = await get_setting("api_allowed_origins", "")
         if allowed_origins_str:
             allowed_origins = [o.strip().lower() for o in allowed_origins_str.split(",") if o.strip()]
-            
+
             # 校验 Origin (CORS) 或 Referer
-            source_match = False
-            for allowed in allowed_origins:
-                if (origin and allowed in origin.lower()) or (referer and allowed in referer.lower()):
-                    source_match = True
-                    break
-            
+            source_match = any(
+                (origin and allowed in origin.lower()) or (referer and allowed in referer.lower())
+                for allowed in allowed_origins
+            )
+
             # 如果配置了白名单且不匹配，也不是本站同源请求，则拒绝
             is_same_origin = (referer and host in referer) or (origin and host in origin)
             if not source_match and not is_same_origin:
                 return Response(content="Access Denied: Unrecognized Origin", status_code=403)
-
-        # --- 2. 基础来源站校验 (同源保护) ---
-        if referer and host not in referer:
-            # 如果请求带了 Referer 但不包含本站 Host，也不是白名单匹配，则拦截
-            if allowed_origins_str:
-                # 已在白名单逻辑处理过，此处可选
-                pass
-            else:
+        else:
+            # --- 3. 基础来源站校验 (同源保护) ---
+            if referer and host not in referer:
+                # 如果请求带了 Referer 但不包含本站 Host，则拦截
                 return Response(content="Invalid Referer", status_code=403)
-            
-        # --- 3. 现代浏览器安全头部校验 (Sec-Fetch-*) ---
-        fetch_site = headers.get("sec-fetch-site")
-        # 如果是 API 请求，必须是 same-origin 或者是来自允许的站点
-        if fetch_site and fetch_site == "cross-site" and not allowed_origins_str:
-            return Response(content="Cross-site API access forbidden", status_code=403)
 
-        # --- 4. 校验 User-Agent (简单 Bot 过滤) ---
-        ua = headers.get("user-agent", "").lower()
-        if not ua or any(bot in ua for bot in ["python", "curl", "wget", "http-client", "postman"]):
-            return Response(content="Automated access forbidden", status_code=403)
+            # --- 4. 现代浏览器安全头部校验 (Sec-Fetch-*) ---
+            # 如果是 API 请求，必须是 same-origin 或者是来自允许的站点
+            if fetch_site == "cross-site":
+                return Response(content="Cross-site API access forbidden", status_code=403)
 
     return await call_next(request)
 
