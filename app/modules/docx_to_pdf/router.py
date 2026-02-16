@@ -1,6 +1,7 @@
 import os
 import uuid
 import asyncio
+from pathlib import Path
 from app.modules.base import BaseModule
 from nicegui import ui, app
 from fastapi.responses import FileResponse
@@ -22,14 +23,15 @@ class DocxToPdfModule(BaseModule):
         return "picture_as_pdf"
 
     def setup_api(self):
-        @app.get(f"{self.router.prefix}/download/{{file_id}}")
-        async def download_pdf(file_id: str):
+        @app.get(f"{self.router.prefix}/download/{{file_id}}/{{file_name}}")
+        async def download_pdf(file_id: str, file_name: str):
             # 路径安全防护：强制仅提取文件名，防止穿越攻击
             safe_id = os.path.basename(file_id)
-            file_path = os.path.join(self.temp_dir, f"{safe_id}.pdf")
+            safe_name = os.path.basename(file_name)
+            file_path = os.path.join(self.temp_dir, safe_id, safe_name)
             if os.path.exists(file_path):
                 return FileResponse(
-                    file_path, media_type="application/pdf", filename="转换结果.pdf"
+                    file_path, media_type="application/pdf", filename=safe_name
                 )
             return {"error": "未找到文件"}
 
@@ -320,8 +322,16 @@ class DocxToPdfModule(BaseModule):
                     safe_ui(status_label.set_text, "正在转换 (LibreOffice 渲染中)...")
 
                     file_id = str(uuid.uuid4())
-                    input_path = os.path.join(self.temp_dir, f"{file_id}.docx")
-                    output_path = os.path.join(self.temp_dir, f"{file_id}.pdf")
+                    work_dir = os.path.join(self.temp_dir, file_id)
+                    os.makedirs(work_dir, exist_ok=True)
+
+                    # 获取原文件名并构建输出路径
+                    original_name = state["name"]
+                    input_stem = Path(original_name).stem
+                    output_name = f"{input_stem}.pdf"
+
+                    input_path = os.path.join(work_dir, original_name)
+                    output_path = os.path.join(work_dir, output_name)
 
                     with open(input_path, "wb") as f:
                         f.write(state["content"])
@@ -339,13 +349,21 @@ class DocxToPdfModule(BaseModule):
                         "pdf",
                         input_path,
                         "--outdir",
-                        self.temp_dir,
+                        work_dir,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                     )
                     stdout, stderr = await process.communicate()
 
                     if process.returncode == 0:
+                        # 转换出的文件名可能不完全一致，确保它被重命名为原名.pdf
+                        actual_output = input_path.replace(".docx", ".pdf")
+                        if (
+                            os.path.exists(actual_output)
+                            and actual_output != output_path
+                        ):
+                            shutil.move(actual_output, output_path)
+
                         safe_ui(status_label.set_text, "后期处理中...")
                         if add_blank_page.value:
                             self._add_blank_page_if_needed(output_path, True)
@@ -364,7 +382,9 @@ class DocxToPdfModule(BaseModule):
                         except Exception:
                             pass
 
-                        download_url = f"{self.router.prefix}/download/{file_id}"
+                        download_url = (
+                            f"{self.router.prefix}/download/{file_id}/{output_name}"
+                        )
 
                         try:
                             result_card.clear()
@@ -374,9 +394,9 @@ class DocxToPdfModule(BaseModule):
                                     "w-full items-center justify-between"
                                 ):
                                     with ui.column():
-                                        ui.label(
-                                            state["name"].replace(".docx", ".pdf")
-                                        ).classes("font-bold text-lg")
+                                        ui.label(output_name).classes(
+                                            "font-bold text-lg"
+                                        )
                                         ui.label(f"页数: {info['pages']} 页").classes(
                                             "text-sm text-slate-500"
                                         )

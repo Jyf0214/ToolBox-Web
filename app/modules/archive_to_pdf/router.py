@@ -584,6 +584,10 @@ class ArchiveToPdfModule(BaseModule):
                             fp.write(f["content"])
                         files_to_process.append((file_path, f["name"]))
 
+                    # 获取原始文件名用于输出命名
+                    original_input_name = state["files"][0]["name"]
+                    input_stem = Path(original_input_name).stem
+                    
                     if is_batch:
                         safe_ui(status_label.set_text, "正在处理文件...")
 
@@ -621,7 +625,8 @@ class ArchiveToPdfModule(BaseModule):
 
                         safe_ui(status_label.set_text, "正在打包结果...")
 
-                        output_zip_name = "converted_files.zip"
+                        # 使用原始输入文件名作为输出压缩包名
+                        output_zip_name = f"{input_stem}.zip"
                         output_zip_path = os.path.join(work_dir, output_zip_name)
 
                         if not self._create_archive(output_dir, output_zip_path):
@@ -687,7 +692,11 @@ class ArchiveToPdfModule(BaseModule):
                         if not result_pdf or not os.path.exists(result_pdf):
                             raise Exception("转换失败")
 
-                        pdf_name = os.path.basename(result_pdf)
+                        # 确保单文件输出也是原文件名
+                        pdf_name = f"{input_stem}.pdf"
+                        final_pdf_path = os.path.join(output_dir, pdf_name)
+                        if os.path.exists(result_pdf) and result_pdf != final_pdf_path:
+                            shutil.move(result_pdf, final_pdf_path)
 
                         state["processing"] = False
                         safe_ui(progress_bar_inner.style, "width: 100%")
