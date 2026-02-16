@@ -192,6 +192,8 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
             sections["queue"] = ui.column().classes("w-full hidden")
             sections["status"] = ui.column().classes("w-full hidden")
             sections["logs"] = ui.column().classes("w-full hidden")
+            
+            ui.timer(0.1, lambda: load_all_sections(), once=True)
 
         async def load_all_sections():
             try:
@@ -199,9 +201,9 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                 async def run_section(name, func):
                     try:
                         with sections[name]:
-                            await func() if asyncio.iscoroutinefunction(
-                                func
-                            ) else func()
+                            res = func()
+                            if asyncio.iscoroutine(res):
+                                await res
                         return True
                     except RuntimeError as e:
                         if "parent slot" in str(e):
@@ -257,4 +259,3 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
                 except Exception:
                     pass
 
-        ui.timer(0.1, load_all_sections, once=True)

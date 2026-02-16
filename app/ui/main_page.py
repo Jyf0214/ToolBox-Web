@@ -78,7 +78,9 @@ def create_main_page(state, modules):
                                     "text-[10px] text-slate-400 underline cursor-help"
                                 )
 
-                    queue_status_ui()
+                    q_container = ui.container()
+                    with q_container:
+                        queue_status_ui()
 
                     def safe_refresh():
                         try:
@@ -87,8 +89,11 @@ def create_main_page(state, modules):
                             if "parent slot" in str(e):
                                 return
                             raise
+                        except Exception:
+                            pass
 
-                    ui.timer(3.0, safe_refresh)
+                    with q_container:
+                        ui.timer(3.0, safe_refresh)
 
                 ui.button(
                     icon="settings", on_click=lambda: ui.navigate.to("/admin")

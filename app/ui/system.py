@@ -31,7 +31,8 @@ async def render_system_status(state):
                     return
                 raise
 
-        ui.timer(2.0, update_stats)
+        with ui.column():
+            ui.timer(2.0, update_stats)
 
     @ui.refreshable
     async def history_list():
@@ -56,7 +57,9 @@ async def render_system_status(state):
                         f"{t.completed_at.strftime('%H:%M')} | {t.task_name} | {t.status}"
                     ).classes("text-xs border-b py-1")
 
-    await history_list()
+    h_container = ui.container()
+    with h_container:
+        await history_list()
 
     def safe_refresh_history():
         try:
@@ -65,8 +68,11 @@ async def render_system_status(state):
             if "parent slot" in str(e):
                 return
             raise
+        except Exception:
+            pass
 
-    ui.timer(5.0, safe_refresh_history)
+    with h_container:
+        ui.timer(5.0, safe_refresh_history)
 
 
 async def render_maintenance(state):
@@ -167,7 +173,9 @@ def render_queue():
                     "text-slate-500 text-sm"
                 )
 
-    q_list()
+    q_container = ui.container()
+    with q_container:
+        q_list()
 
     def safe_refresh_q():
         try:
@@ -176,5 +184,8 @@ def render_queue():
             if "parent slot" in str(e):
                 return
             raise
+        except Exception:
+            pass
 
-    ui.timer(2.0, safe_refresh_q)
+    with q_container:
+        ui.timer(2.0, safe_refresh_q)
