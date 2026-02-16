@@ -76,11 +76,27 @@ class ArchiveToPdfModule(BaseModule):
             safe_name = os.path.basename(file_name)
             file_path = os.path.join(self.temp_dir, safe_id, safe_name)
 
+            # 如果文件不存在，检查是否需要按需压缩
             if not os.path.exists(file_path):
-                return JSONResponse(
-                    status_code=404,
-                    content={"error": "文件不存在或已过期", "reason": "file_not_found"},
-                )
+                work_dir = os.path.join(self.temp_dir, safe_id)
+                output_dir = os.path.join(work_dir, "output")
+                if os.path.exists(output_dir) and safe_name.endswith(".zip"):
+                    # 只有多文档批量转换的情况下才会进入按需压缩
+                    # 启动压缩任务（在执行器中运行以防阻塞）
+                    print(f"[Download] 正在为 {safe_id} 执行按需压缩...")
+                    success = await asyncio.get_event_loop().run_in_executor(
+                        None, self._create_archive, output_dir, file_path
+                    )
+                    if not success:
+                        return JSONResponse(
+                            status_code=500,
+                            content={"error": "即时压缩失败", "reason": "zip_failed"},
+                        )
+                else:
+                    return JSONResponse(
+                        status_code=404,
+                        content={"error": "文件不存在或已过期", "reason": "file_not_found"},
+                    )
 
             token_key = f"{safe_id}:{safe_name}"
             token_info = self._download_tokens.get(token_key)
@@ -626,7 +642,8 @@ class ArchiveToPdfModule(BaseModule):
                         safe_ui(status_label.set_text, "正在打包结果...")
 
                         # 确定输出压缩包名称逻辑
-                        if len(state["files"]) == 1 and original_input_name.lower().endswith(".zip"):
+                        is_original_zip = len(state["files"]) == 1 and original_input_name.lower().endswith(".zip")
+                        if is_original_zip:
                             # 如果用户原本只上传了一个压缩包，保留原压缩包名称
                             output_zip_name = original_input_name
                         else:
@@ -635,8 +652,14 @@ class ArchiveToPdfModule(BaseModule):
                             
                         output_zip_path = os.path.join(work_dir, output_zip_name)
 
-                        if not self._create_archive(output_dir, output_zip_path):
-                            raise Exception("创建输出压缩包失败")
+                        # 压缩逻辑：只有原本是压缩包上传的才立即执行压缩
+                        if is_original_zip:
+                            safe_ui(status_label.set_text, "正在打包结果...")
+                            if not self._create_archive(output_dir, output_zip_path):
+                                raise Exception("创建输出压缩包失败")
+                        else:
+                            # 多文档批量上传，标记为转换完成，压缩将延迟到下载时
+                            pass
 
                         shutil.rmtree(temp_input, ignore_errors=True)
 
