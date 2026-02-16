@@ -68,6 +68,29 @@ async def render_settings(state):
 
         ui.button("保存安全设置", on_click=save_security).classes("mt-4")
 
+    # API 来源限制
+    with ui.card().classes("w-full p-6 shadow-sm border mb-6"):
+        ui.label("API 来源限制 (CORS/Origin)").classes("text-lg font-bold mb-4")
+        ui.markdown(
+            "仅允许以下域名发起的 API 请求。多个请用逗号分隔（例如 `https://example.com`）。留空则不限制（仅允许同源）。"
+        ).classes("text-xs text-slate-500 mb-2")
+        allowed_origins = await get_setting("api_allowed_origins", "")
+        origins_in = (
+            ui.input(
+                "允许访问的站点链接",
+                value=allowed_origins,
+                placeholder="https://mysite.com, http://localhost:3000",
+            )
+            .classes("w-full")
+            .props("outlined")
+        )
+
+        async def save_origins():
+            await set_setting("api_allowed_origins", origins_in.value)
+            ui.notify("API 来源设置已保存")
+
+        ui.button("保存来源设置", on_click=save_origins).classes("mt-4")
+
     # Cloudflare Turnstile 设置
     with ui.card().classes("w-full p-6 shadow-sm border"):
         ui.label("Cloudflare Turnstile 验证码").classes("text-lg font-bold mb-4")
