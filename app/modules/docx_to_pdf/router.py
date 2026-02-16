@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from app.modules.base import BaseModule
 from nicegui import ui, app
+from fastapi import Request
 from fastapi.responses import FileResponse
 
 
@@ -24,7 +25,12 @@ class DocxToPdfModule(BaseModule):
 
     def setup_api(self):
         @app.get(f"{self.router.prefix}/download/{{file_id}}/{{file_name}}")
-        async def download_pdf(file_id: str, file_name: str):
+        async def download_pdf(request: Request, file_id: str, file_name: str):
+            headers = request.headers
+            # 严格校验：禁止直接通过 URL 访问 API
+            if headers.get("sec-fetch-site") == "none":
+                return {"error": "Access Denied"}
+
             # 路径安全防护：强制仅提取文件名，防止穿越攻击
             safe_id = os.path.basename(file_id)
             safe_name = os.path.basename(file_name)

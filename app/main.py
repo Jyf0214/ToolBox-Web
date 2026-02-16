@@ -13,6 +13,42 @@ from app.core.settings_manager import get_local_secret
 
 
 @app.middleware("http")
+async def api_security_middleware(request: Request, call_next):
+    """
+    API 安全防护中间件
+    拦截直接通过脚本或逆向工具调用的 API 请求
+    """
+    path = request.url.path
+    
+    # 仅针对 API 和 下载路径进行深度校验
+    if path.startswith("/api") or "/download/" in path:
+        headers = request.headers
+        
+        # 1. 来源站校验 (Referer)
+        referer = headers.get("referer", "")
+        host = headers.get("host", "")
+        
+        # 允许没有 Referer 的情况（虽然少见），但如果有，必须包含当前 Host
+        if referer and host not in referer:
+            return Response(content="Invalid Referer", status_code=403)
+            
+        # 2. 现代浏览器安全头部校验 (Sec-Fetch-*)
+        # 这些头部很难被脚本自动精准伪造（尤其是 same-origin 逻辑）
+        fetch_site = headers.get("sec-fetch-site")
+        if fetch_site and fetch_site != "same-origin":
+            # 允许部分合法的跨站导航，但 API 请求必须是 same-origin
+            if path.startswith("/api"):
+                return Response(content="Direct API access forbidden", status_code=403)
+
+        # 3. 校验 User-Agent (简单 Bot 过滤)
+        ua = headers.get("user-agent", "").lower()
+        if not ua or any(bot in ua for bot in ["python", "curl", "wget", "http-client", "postman"]):
+            return Response(content="Automated access forbidden", status_code=403)
+
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def add_no_cache_headers(request: Request, call_next):
     response: Response = await call_next(request)
     response.headers["Cache-Control"] = (

@@ -68,6 +68,12 @@ class ArchiveToPdfModule(BaseModule):
         async def download_archive(
             request: Request, file_id: str, file_name: str, token: str = None
         ):
+            headers = request.headers
+            # 深度头部校验：确保请求是由真实的浏览器下载行为触发的
+            # Sec-Fetch-Dest 通常为 'iframe' 或 'document'
+            if headers.get("sec-fetch-site") == "none":
+                return JSONResponse(status_code=403, content={"error": "禁止直接访问"})
+
             client_ip = request.client.host
             if "x-forwarded-for" in request.headers:
                 client_ip = request.headers["x-forwarded-for"].split(",")[0]
