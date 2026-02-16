@@ -55,6 +55,8 @@ def create_main_page(state, modules):
 
                     @ui.refreshable
                     def queue_status_ui():
+                        if queue_status_ui._is_deleted:
+                            return
                         status = global_task_manager.get_status()
                         with ui.row().classes(
                             "items-center bg-slate-700 rounded-full px-3 py-1 gap-2 border border-slate-600"
@@ -79,7 +81,12 @@ def create_main_page(state, modules):
                                 )
 
                     queue_status_ui()
-                    ui.timer(3.0, queue_status_ui.refresh)
+
+                    def safe_refresh():
+                        if not queue_status_ui._is_deleted:
+                            queue_status_ui.refresh()
+
+                    ui.timer(3.0, safe_refresh)
 
                 ui.button(
                     icon="settings", on_click=lambda: ui.navigate.to("/admin")

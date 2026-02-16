@@ -195,77 +195,63 @@ def create_admin_page(state, load_modules_func, sync_modules_func):
         async def load_all_sections():
             try:
                 # 预加载所有组件内容
-                try:
-                    with sections["dashboard"]:
-                        await render_dashboard(state)
-                except Exception as e:
-                    print(f"Error rendering dashboard: {e}")
-                    with sections["dashboard"]:
-                        ui.label(f"控制面板加载失败: {e}").classes("text-negative")
+                async def run_section(name, func):
+                    if main_container._is_deleted or sections[name]._is_deleted:
+                        return False
+                    try:
+                        with sections[name]:
+                            await func() if asyncio.iscoroutinefunction(
+                                func
+                            ) else func()
+                        return True
+                    except RuntimeError as e:
+                        if "parent slot" in str(e):
+                            return False
+                        raise
+                    except Exception as e:
+                        print(f"Error rendering {name}: {e}")
+                        with sections[name]:
+                            ui.label(f"{name} 加载失败: {e}").classes("text-negative")
+                        return True
 
-                try:
-                    with sections["settings"]:
-                        await render_settings(state)
-                        ui.separator().classes("my-8")
-                        await render_smtp()
-                except Exception as e:
-                    print(f"Error rendering settings: {e}")
-                    with sections["settings"]:
-                        ui.label(f"设置加载失败: {e}").classes("text-negative")
+                import asyncio
 
-                try:
-                    with sections["tools"]:
-                        await render_tools(state, load_modules_func, sync_modules_func)
-                except Exception as e:
-                    print(f"Error rendering tools: {e}")
-                    with sections["tools"]:
-                        ui.label(f"工具管理加载失败: {e}").classes("text-negative")
+                if not await run_section("dashboard", lambda: render_dashboard(state)):
+                    return
 
-                try:
-                    with sections["update"]:
-                        await render_update()
-                except Exception as e:
-                    print(f"Error rendering update: {e}")
-                    with sections["update"]:
-                        ui.label(f"系统更新加载失败: {e}").classes("text-negative")
+                async def load_settings():
+                    await render_settings(state)
+                    ui.separator().classes("my-8")
+                    await render_smtp()
 
-                try:
-                    with sections["maintenance"]:
-                        await render_maintenance(state)
-                except Exception as e:
-                    print(f"Error rendering maintenance: {e}")
-                    with sections["maintenance"]:
-                        ui.label(f"系统维护加载失败: {e}").classes("text-negative")
+                if not await run_section("settings", load_settings):
+                    return
 
-                try:
-                    with sections["queue"]:
-                        render_queue()
-                except Exception as e:
-                    print(f"Error rendering queue: {e}")
-                    with sections["queue"]:
-                        ui.label(f"队列监控加载失败: {e}").classes("text-negative")
-
-                try:
-                    with sections["status"]:
-                        await render_system_status(state)
-                except Exception as e:
-                    print(f"Error rendering status: {e}")
-                    with sections["status"]:
-                        ui.label(f"运行状态加载失败: {e}").classes("text-negative")
-
-                try:
-                    with sections["logs"]:
-                        await render_logs(state)
-                except Exception as e:
-                    print(f"Error rendering logs: {e}")
-                    with sections["logs"]:
-                        ui.label(f"访问日志加载失败: {e}").classes("text-negative")
+                if not await run_section(
+                    "tools",
+                    lambda: render_tools(state, load_modules_func, sync_modules_func),
+                ):
+                    return
+                if not await run_section("update", render_update):
+                    return
+                if not await run_section(
+                    "maintenance", lambda: render_maintenance(state)
+                ):
+                    return
+                if not await run_section("queue", render_queue):
+                    return
+                if not await run_section("status", lambda: render_system_status(state)):
+                    return
+                if not await run_section("logs", lambda: render_logs(state)):
+                    return
 
                 # 加载完成后隐藏 loading，显示默认 dashboard
-                loading_spinner.set_visibility(False)
-                switch_to("dashboard")
+                if not loading_spinner._is_deleted:
+                    loading_spinner.set_visibility(False)
+                    switch_to("dashboard")
             except Exception as e:
                 print(f"Critical error in load_all_sections: {e}")
-                ui.notify("管理后台组件初始化发生严重错误", color="negative")
+                if not main_container._is_deleted:
+                    ui.notify("管理后台组件初始化发生严重错误", color="negative")
 
         ui.timer(0.1, load_all_sections, once=True)

@@ -20,6 +20,8 @@ async def render_system_status(state):
         m_lab = ui.label("MEM: -")
 
         async def update_stats():
+            if c_lab._is_deleted or m_lab._is_deleted:
+                return
             s = global_task_manager.get_system_stats()
             c_lab.set_text(f"CPU: {s['cpu_percent']}%")
             m_lab.set_text(
@@ -30,6 +32,8 @@ async def render_system_status(state):
 
     @ui.refreshable
     async def history_list():
+        if history_list._is_deleted:
+            return
         if not state.db_connected:
             return
         async with database.AsyncSessionLocal() as s:
@@ -52,7 +56,12 @@ async def render_system_status(state):
                     ).classes("text-xs border-b py-1")
 
     await history_list()
-    ui.timer(5.0, history_list.refresh)
+
+    def safe_refresh_history():
+        if not history_list._is_deleted:
+            history_list.refresh()
+
+    ui.timer(5.0, safe_refresh_history)
 
 
 async def render_maintenance(state):
@@ -138,6 +147,8 @@ def render_queue():
 
     @ui.refreshable
     def q_list():
+        if q_list._is_deleted:
+            return
         active = list(global_task_manager.active_tasks.values())
         waiting = global_task_manager.queue
         with ui.card().classes("w-full p-4 shadow-sm border"):
@@ -154,4 +165,9 @@ def render_queue():
                 )
 
     q_list()
-    ui.timer(2.0, q_list.refresh)
+
+    def safe_refresh_q():
+        if not q_list._is_deleted:
+            q_list.refresh()
+
+    ui.timer(2.0, safe_refresh_q)

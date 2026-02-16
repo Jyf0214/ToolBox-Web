@@ -306,6 +306,9 @@ class ArchiveToPdfModule(BaseModule):
         async def init_security():
             from app.core.settings_manager import get_setting
 
+            if captcha_container._is_deleted:
+                return
+
             tool = await get_tool_security()
             if tool and tool.requires_captcha:
                 security_state["requires_captcha"] = True
