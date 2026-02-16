@@ -392,9 +392,11 @@ class ArchiveToPdfModule(BaseModule):
 
             for file in files:
                 file_path = os.path.join(root, file)
+                file_lower = file.lower()
 
-                # 复制非转换文件也放入处理队列
-                files_to_process.append((file_path, file, current_output_dir))
+                # 只处理 .docx 和 .md 文件
+                if file_lower.endswith(".docx") or file_lower.endswith(".md"):
+                    files_to_process.append((file_path, file, current_output_dir))
 
         if not files_to_process:
             return 0, 0
@@ -846,11 +848,15 @@ class ArchiveToPdfModule(BaseModule):
                                             f"成功转换 {success_count}/{total_count} 个文档"
                                         ).classes("text-sm text-slate-500")
 
-                                    ui.button(
-                                        "下载结果",
-                                        icon="download",
-                                        on_click=lambda: ui.download(download_url),
-                                    ).props("color=primary")
+                                    # 直接显示下载链接
+                                    ui.html(
+                                        f'<a href="{download_url}" download="{output_zip_name}" '
+                                        f'style="display:inline-flex;align-items:center;gap:8px;'
+                                        f"padding:8px 16px;background:#1976d2;color:white;"
+                                        f'text-decoration:none;border-radius:4px;font-weight:500;">'
+                                        f'<span class="material-icons">download</span>'
+                                        f"下载结果</a>"
+                                    )
                         except Exception:
                             pass
                     else:
@@ -912,11 +918,15 @@ class ArchiveToPdfModule(BaseModule):
                                             "text-sm text-slate-500"
                                         )
 
-                                    ui.button(
-                                        "下载PDF",
-                                        icon="download",
-                                        on_click=lambda: ui.download(download_url),
-                                    ).props("color=primary")
+                                    # 直接显示下载链接
+                                    ui.html(
+                                        f'<a href="{download_url}" download="{pdf_name}" '
+                                        f'style="display:inline-flex;align-items:center;gap:8px;'
+                                        f"padding:8px 16px;background:#1976d2;color:white;"
+                                        f'text-decoration:none;border-radius:4px;font-weight:500;">'
+                                        f'<span class="material-icons">download</span>'
+                                        f"下载PDF</a>"
+                                    )
                         except Exception:
                             pass
 

@@ -505,11 +505,15 @@ class DocxToPdfModule(BaseModule):
                                             ),
                                         ).props("outline")
 
-                                        ui.button(
-                                            "下载 PDF",
-                                            icon="download",
-                                            on_click=lambda: ui.download(download_url),
-                                        ).props("color=primary")
+                                        # 直接显示下载链接
+                                        ui.html(
+                                            f'<a href="{download_url}" download="{output_name}" '
+                                            f'style="display:inline-flex;align-items:center;gap:8px;'
+                                            f"padding:8px 16px;background:#1976d2;color:white;"
+                                            f'text-decoration:none;border-radius:4px;font-weight:500;">'
+                                            f'<span class="material-icons">download</span>'
+                                            f"下载 PDF</a>"
+                                        )
                         except Exception:
                             pass
                     else:
