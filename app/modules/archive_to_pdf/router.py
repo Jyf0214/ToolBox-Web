@@ -926,15 +926,13 @@ class ArchiveToPdfModule(BaseModule):
                                             f"成功转换 {success_count}/{total_count} 个文档"
                                         ).classes("text-sm text-slate-500")
 
-                                    # 直接显示下载链接
-                                    ui.html(
-                                        f'<a href="{download_url}" download="{output_zip_name}" '
-                                        f'style="display:inline-flex;align-items:center;gap:8px;'
-                                        f"padding:8px 16px;background:#1976d2;color:white;"
-                                        f'text-decoration:none;border-radius:4px;font-weight:500;">'
-                                        f'<span class="material-icons">download</span>'
-                                        f"下载结果</a>"
-                                    )
+                                    # 直接显示下载按钮
+                                    with ui.button("下载结果", icon="download").props(
+                                        "color=primary"
+                                    ) as download_btn:
+                                        download_btn.on(
+                                            "click", lambda: ui.download(download_url)
+                                        )
                         except Exception:
                             pass
                     else:
@@ -996,15 +994,13 @@ class ArchiveToPdfModule(BaseModule):
                                             "text-sm text-slate-500"
                                         )
 
-                                    # 直接显示下载链接
-                                    ui.html(
-                                        f'<a href="{download_url}" download="{pdf_name}" '
-                                        f'style="display:inline-flex;align-items:center;gap:8px;'
-                                        f"padding:8px 16px;background:#1976d2;color:white;"
-                                        f'text-decoration:none;border-radius:4px;font-weight:500;">'
-                                        f'<span class="material-icons">download</span>'
-                                        f"下载PDF</a>"
-                                    )
+                                    # 直接显示下载按钮
+                                    with ui.button("下载PDF", icon="download").props(
+                                        "color=primary"
+                                    ) as download_btn:
+                                        download_btn.on(
+                                            "click", lambda: ui.download(download_url)
+                                        )
                         except Exception:
                             pass
 

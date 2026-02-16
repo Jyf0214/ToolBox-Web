@@ -232,15 +232,13 @@ class MdToPdfModule(BaseModule):
                         ui.label("转换成功！").classes("text-green-600 font-bold mb-2")
 
                         with ui.row().classes("gap-4"):
-                            # 直接显示下载链接
-                            ui.html(
-                                f'<a href="{download_url}" download="Markdown转换结果.pdf" '
-                                f'style="display:inline-flex;align-items:center;gap:8px;'
-                                f"padding:8px 16px;background:#1976d2;color:white;"
-                                f'text-decoration:none;border-radius:4px;font-weight:500;">'
-                                f'<span class="material-icons">download</span>'
-                                f"下载 PDF</a>"
-                            )
+                            # 直接显示下载按钮
+                            with ui.button("下载 PDF", icon="download").props(
+                                "color=primary"
+                            ) as download_btn:
+                                download_btn.on(
+                                    "click", lambda: ui.download(download_url)
+                                )
                             ui.button(
                                 "预览",
                                 on_click=lambda: ui.open(
